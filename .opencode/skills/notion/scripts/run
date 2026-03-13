@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Wrapper to run Notion skill scripts with proper Python environment
 # Usage: scripts/run script_name.py [args...]
+#
+# The Python scripts auto-bootstrap their own venv via notion_utils.py,
+# so this wrapper is optional. It just provides a convenient entry point
+# that skips the re-exec overhead if the venv already exists.
 
 set -e
 
@@ -8,27 +12,20 @@ SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="$SKILL_DIR/.venv"
 SCRIPTS_DIR="$SKILL_DIR/scripts"
 
-# Check if venv exists
-if [ ! -d "$VENV_DIR" ]; then
-    echo "Error: Virtual environment not found."
-    echo "Run: ./scripts/bootstrap"
-    exit 1
-fi
-
-# Activate venv and run script
-source "$VENV_DIR/bin/activate"
-
 # Get script name
 SCRIPT="$1"
 shift
 
-# Run from scripts directory
-cd "$SCRIPTS_DIR"
-
-if [ ! -f "$SCRIPT" ]; then
-    echo "Error: Script not found: $SCRIPT"
+if [ ! -f "$SCRIPTS_DIR/$SCRIPT" ]; then
+    echo "Error: Script not found: $SCRIPT" >&2
+    echo "Available scripts:" >&2
+    ls "$SCRIPTS_DIR"/*.py 2>/dev/null | xargs -n1 basename >&2
     exit 1
 fi
 
-# Execute the script with remaining arguments
-python3 "$SCRIPT" "$@"
+# Use venv python if available, otherwise system python (will auto-bootstrap)
+if [ -x "$VENV_DIR/bin/python3" ]; then
+    exec "$VENV_DIR/bin/python3" "$SCRIPTS_DIR/$SCRIPT" "$@"
+else
+    exec python3 "$SCRIPTS_DIR/$SCRIPT" "$@"
+fi

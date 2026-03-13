@@ -2,44 +2,155 @@
 """Shared utilities for Notion API scripts.
 
 This module provides common functionality for all Notion scripts:
+- Automatic virtual environment setup (zero manual bootstrap)
 - Secure API key loading (never exposed in process arguments)
 - Standardized API calls with rate limiting and retry logic
 - Notion ID parsing and validation
+- Concurrent API helpers
 - Error handling
 """
 
 import json
 import os
 import re
+import subprocess
 import sys
 import time
+from pathlib import Path
+
+# ── Auto-bootstrap: ensure we're running in the skill's venv ────────
+#
+# When an agent runs `python3 read_page.py`, the system python has no
+# `requests` installed. This block detects that, creates the skill's
+# venv (using uv or stdlib venv), installs deps, and re-execs the
+# original command under the venv's python. The re-exec only happens
+# once — the second invocation lands inside the venv and skips this.
+
+_SKILL_DIR = Path(__file__).parent.parent
+_VENV_DIR = _SKILL_DIR / ".venv"
+_VENV_PYTHON = _VENV_DIR / "bin" / "python3"
+_REQUIREMENTS = _SKILL_DIR / "requirements.txt"
+
+
+def _is_inside_venv() -> bool:
+    """Check if we're running inside the skill's virtual environment."""
+    # sys.prefix changes when a venv is active
+    return sys.prefix == str(_VENV_DIR) or str(_VENV_DIR) in sys.prefix
+
+
+def _bootstrap_and_reexec() -> None:
+    """Create the venv, install deps, and re-exec the current script."""
+    print("notion-skill: first run — setting up Python environment...", file=sys.stderr)
+
+    if not _VENV_DIR.exists():
+        # Prefer uv for speed (creates venv + installs in one shot)
+        uv = _find_uv()
+        if uv:
+            print(f"notion-skill: creating venv with uv...", file=sys.stderr)
+            subprocess.check_call(
+                [uv, "venv", str(_VENV_DIR), "--quiet"],
+                stdout=sys.stderr,
+            )
+            if _REQUIREMENTS.exists():
+                subprocess.check_call(
+                    [
+                        uv,
+                        "pip",
+                        "install",
+                        "--quiet",
+                        "-r",
+                        str(_REQUIREMENTS),
+                        "--python",
+                        str(_VENV_PYTHON),
+                    ],
+                    stdout=sys.stderr,
+                )
+            else:
+                subprocess.check_call(
+                    [
+                        uv,
+                        "pip",
+                        "install",
+                        "--quiet",
+                        "requests",
+                        "--python",
+                        str(_VENV_PYTHON),
+                    ],
+                    stdout=sys.stderr,
+                )
+        else:
+            # Fallback to stdlib venv + pip
+            print(
+                f"notion-skill: creating venv with python3 -m venv...", file=sys.stderr
+            )
+            subprocess.check_call(
+                [sys.executable, "-m", "venv", str(_VENV_DIR)],
+                stdout=sys.stderr,
+            )
+            pip = str(_VENV_DIR / "bin" / "pip")
+            if _REQUIREMENTS.exists():
+                subprocess.check_call(
+                    [pip, "install", "--quiet", "-r", str(_REQUIREMENTS)],
+                    stdout=sys.stderr,
+                )
+            else:
+                subprocess.check_call(
+                    [pip, "install", "--quiet", "requests"],
+                    stdout=sys.stderr,
+                )
+
+    print("notion-skill: environment ready, restarting...", file=sys.stderr)
+
+    # Re-exec the original command under the venv's python
+    os.execv(str(_VENV_PYTHON), [str(_VENV_PYTHON)] + sys.argv)
+
+
+def _find_uv() -> str | None:
+    """Find uv binary if available."""
+    # Check common locations
+    for candidate in [
+        os.path.expanduser("~/.local/bin/uv"),
+        os.path.expanduser("~/.cargo/bin/uv"),
+        "/usr/local/bin/uv",
+    ]:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+
+    # Check PATH
+    from shutil import which
+
+    return which("uv")
+
+
+# Run the bootstrap check before importing anything that needs pip packages
+if not _is_inside_venv() and _VENV_PYTHON.exists():
+    # Venv exists but we're not in it — re-exec directly
+    os.execv(str(_VENV_PYTHON), [str(_VENV_PYTHON)] + sys.argv)
+elif not _is_inside_venv():
+    # No venv at all — bootstrap then re-exec
+    try:
+        _bootstrap_and_reexec()
+    except (subprocess.CalledProcessError, OSError) as e:
+        print(f"notion-skill: auto-bootstrap failed: {e}", file=sys.stderr)
+        print(
+            f"notion-skill: run manually: cd {_SKILL_DIR} && ./scripts/bootstrap",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+# ── If we get here, we're inside the venv. Safe to import pip packages. ──
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
-
-# Add skill's virtual environment to path if it exists
-_SKILL_DIR = Path(__file__).parent.parent
-_VENV_SITE_PACKAGES = (
-    _SKILL_DIR
-    / ".venv"
-    / "lib"
-    / f"python{sys.version_info.major}.{sys.version_info.minor}"
-    / "site-packages"
-)
-if _VENV_SITE_PACKAGES.exists() and str(_VENV_SITE_PACKAGES) not in sys.path:
-    sys.path.insert(0, str(_VENV_SITE_PACKAGES))
 
 try:
     import requests
 except ImportError:
-    print("Error: 'requests' library not found.", file=sys.stderr)
-    print("", file=sys.stderr)
-    print("To install dependencies, run:", file=sys.stderr)
-    print(f"  cd {_SKILL_DIR}", file=sys.stderr)
-    print("  ./scripts/bootstrap", file=sys.stderr)
-    print("", file=sys.stderr)
+    # This should never happen after bootstrap, but just in case
+    print("Error: 'requests' library not found even after bootstrap.", file=sys.stderr)
+    print(f"  Try: cd {_SKILL_DIR} && ./scripts/bootstrap", file=sys.stderr)
     sys.exit(1)
 
 
