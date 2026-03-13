@@ -21,7 +21,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from notion_utils import (
     load_api_key,
@@ -37,8 +37,8 @@ def insert_blocks(
     parent_id: str,
     blocks: List[Dict],
     api_key: str,
-    after_block_id: str = None,
-    position: int = None,
+    after_block_id: Optional[str] = None,
+    position: Optional[int] = None,
 ):
     """Insert blocks at a specific position.
 
@@ -55,7 +55,7 @@ def insert_blocks(
             after_block_id = existing_blocks[position - 1]["id"]
 
     # Build request data
-    data = {"children": blocks}
+    data: Dict[str, Any] = {"children": blocks}
     if after_block_id:
         data["after"] = after_block_id
 
@@ -91,6 +91,7 @@ def main():
         api_key = load_api_key()
         parent_id = parse_notion_id(args.parent)
 
+        blocks: List[Dict] = []
         if args.text:
             blocks = [
                 {

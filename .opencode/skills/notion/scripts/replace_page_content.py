@@ -101,6 +101,7 @@ def main():
         api_key = load_api_key()
         page_id = parse_notion_id(args.page_id)
 
+        blocks: List[Dict] = []
         if args.markdown:
             blocks = markdown_to_blocks(args.markdown)
         elif args.file:

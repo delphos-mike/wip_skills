@@ -20,6 +20,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Optional
 
 from notion_utils import (
     load_api_key,
@@ -29,7 +30,9 @@ from notion_utils import (
 )
 
 
-def update_block(block_id: str, content: str, api_key: str, block_type: str = None):
+def update_block(
+    block_id: str, content: str, api_key: str, block_type: Optional[str] = None
+):
     """Update an existing block."""
 
     # Get current block to determine type
@@ -95,6 +98,7 @@ def main():
         api_key = load_api_key()
         block_id = parse_notion_id(args.block_id)
 
+        content = ""
         if args.text:
             content = args.text
         elif args.file:
