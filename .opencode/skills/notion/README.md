@@ -1,148 +1,92 @@
-# Notion Skill for Claude Code
+# Notion Skill for AI Agents
 
 Complete Notion document management via API. Search, read, write, update, delete, and analyze content.
 
 ## Quick Setup
 
 ```bash
-# 1. Clone or copy skill to ~/.claude/skills/notion
-cd ~/.claude/skills/notion
+# 1. Configure API key
+mkdir -p ~/.envs
+echo "NOTION_API_KEY=ntn_..." > ~/.envs/notion.env
 
-# 2. Run bootstrap script (installs dependencies in isolated venv)
-./scripts/bootstrap
-
-# 3. Configure API key
-echo "NOTION_API_KEY=secret_..." > ~/.envs/notion.env
-
-# 4. Share integration with your Notion pages
+# 2. Share integration with your Notion pages
 # In Notion: Page → ••• → Connections → Add your integration
 
-# 5. Test it
-scripts/search_pages.py "test"
+# 3. Test it (auto-bootstraps on first run)
+python3 .opencode/skills/notion/scripts/search_pages.py "test"
 ```
+
+That's it. No manual `bootstrap` or `pip install` needed — scripts auto-detect
+whether a virtual environment exists, create one if missing (using `uv` for
+speed, or `pip` as fallback), install dependencies, and re-exec under the venv
+Python. Subsequent runs skip bootstrap entirely.
 
 ## Environment Management
 
-The skill uses an isolated Python virtual environment (`.venv/`) to avoid dependency conflicts.
+Scripts use an isolated `.venv/` inside the skill directory. This is created
+and managed automatically.
 
-### First Time Setup
-```bash
-./scripts/bootstrap
-```
+| Scenario | What happens |
+|----------|-------------|
+| First run, no `.venv/` | Auto-creates venv, installs deps, re-execs |
+| Subsequent runs | Detects venv, re-execs under venv Python |
+| Deps missing | Delete `.venv/`, next run re-bootstraps |
 
-This will:
-- Create `.venv/` virtual environment
-- Install `requests` library
-- Verify installation
-- Check for API key configuration
+### Manual usage (optional)
 
-### How It Works
-
-**Scripts automatically detect and use the virtual environment:**
-- `notion_utils.py` adds `.venv/site-packages` to `sys.path`
-- No manual activation needed when running scripts directly
-- Dependencies persist across sessions
-
-### Manual Usage
-
-If you prefer to activate the venv manually:
 ```bash
 source .venv/bin/activate
 python3 scripts/read_page.py <page-id>
 deactivate
 ```
 
-Or use the wrapper:
+Or use the wrapper script:
 ```bash
 scripts/run read_page.py <page-id>
 ```
 
 ## Installation for Other Users
 
-When sharing this skill:
-
-**1. Share as Git repository:**
-```bash
-git clone https://github.com/yourusername/notion-skill
-cd notion-skill
-./scripts/bootstrap
-```
-
-**2. Each user needs their own:**
-- Notion integration (create at notion.so/my-integrations)
-- API key in `~/.envs/notion.env`
-- Shared pages (add integration in Notion)
+1. Clone the repo containing this skill
+2. Create a Notion integration at [notion.so/my-integrations](https://www.notion.so/my-integrations)
+3. Add API key to `~/.envs/notion.env`
+4. Share pages with the integration in Notion
+5. Run any script — auto-bootstrap handles the rest
 
 ## Dependencies
 
 - Python 3.8+
-- `requests>=2.31.0` (installed by bootstrap script)
-
-Dependencies are isolated in `.venv/` and don't affect system Python or other skills.
+- `requests>=2.31.0` (auto-installed by bootstrap)
 
 ## Files
 
 ```
 notion/
 ├── scripts/
-│   ├── bootstrap          # Setup script (run once)
-│   ├── run               # Wrapper to run scripts with venv
-│   ├── notion_utils.py   # Shared utilities (auto-loads venv)
+│   ├── notion_utils.py   # Shared utilities + auto-bootstrap
+│   ├── run               # Optional wrapper script
+│   ├── bootstrap          # Legacy setup script (still works)
 │   └── *.py              # 15 command scripts
 ├── requirements.txt      # Python dependencies
-├── SKILL.md             # Comprehensive documentation
+├── SKILL.md             # Agent-facing documentation (loaded by skill system)
 ├── QUICK_REFERENCE.md   # Quick command lookup
-└── .venv/               # Virtual environment (created by bootstrap)
+└── .venv/               # Virtual environment (auto-created)
 ```
 
 ## Troubleshooting
 
 ### "ModuleNotFoundError: No module named 'requests'"
-
-Run the bootstrap script:
-```bash
-cd ~/.claude/skills/notion
-./scripts/bootstrap
-```
-
-### Scripts still can't find requests
-
-Check that venv exists:
-```bash
-ls -la .venv/
-```
-
-If missing, run bootstrap again. If venv exists but scripts fail, check Python version:
-```bash
-python3 --version  # Should be 3.8+
-```
+Delete `.venv/` in the skill directory and run any script — it will re-bootstrap.
 
 ### API key issues
-
-Verify configuration:
 ```bash
-cat ~/.envs/notion.env  # Should show NOTION_API_KEY=secret_...
+cat ~/.envs/notion.env  # Should show NOTION_API_KEY=ntn_...
 ```
 
 ### Permission issues
-
-Verify integration is shared with the page:
-- Open page in Notion
-- Click ••• (three dots)
-- Connections → Should see your integration listed
-
-## Best Practices for Skill Publishing
-
-When publishing this skill for others:
-
-1. **Include bootstrap script** - Auto-setup is critical
-2. **Document setup clearly** - See "Quick Setup" above
-3. **Don't commit .venv/** - Add to .gitignore
-4. **Include requirements.txt** - Pin dependency versions
-5. **Test on clean system** - Verify bootstrap works
+Open page in Notion → ••• → Connections → verify your integration is listed.
 
 ## See Also
 
-- `SKILL.md` - Full documentation for all 16 scripts
-- `QUICK_REFERENCE.md` - "I want to..." command lookup
-- `/tmp/notion_skill_improvement_plan.md` - Performance optimization plans
+- `SKILL.md` — Full documentation loaded by agents
+- `QUICK_REFERENCE.md` — Quick "I want to..." command lookup
