@@ -23,37 +23,65 @@ Examples:
     # Skip confirmation (use with caution!)
     delete_blocks.py --all <page_id> --yes
 """
+
 import argparse
 import json
 import sys
-from pathlib import Path
-from typing import Dict, List, Any
 
-from notion_utils import load_api_key, api_call, parse_notion_id, get_all_blocks
+from notion_utils import (
+    load_api_key,
+    parse_notion_id,
+    get_all_blocks,
+    concurrent_deletes,
+    is_interactive,
+)
 
 
-def delete_block(block_id: str, api_key: str):
-    """Delete a single block."""
-    response = api_call(f'blocks/{block_id}', api_key, 'DELETE')
+def confirm_delete(count: int, extra: str = "") -> bool:
+    """Prompt for confirmation before deleting blocks.
 
-    if 'object' in response and response['object'] == 'error':
-        print(f"Error deleting {block_id}: {response.get('message')}", file=sys.stderr)
-        return False
+    Returns True if confirmed or non-interactive (requires --yes in that case).
+    """
+    if not is_interactive():
+        print(
+            "Error: confirmation required. Use --yes to skip in non-interactive mode.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
+    print("\n" + "=" * 70, file=sys.stderr)
+    print("WARNING: DANGEROUS OPERATION", file=sys.stderr)
+    print("=" * 70, file=sys.stderr)
+    print(
+        f"\nThis will DELETE {count} BLOCKS{extra} and their COMMENTS!", file=sys.stderr
+    )
+    print("\n" + "=" * 70, file=sys.stderr)
+    response = input("\nType 'yes' to delete blocks and proceed: ")
+    if response != "yes":
+        print("Cancelled", file=sys.stderr)
+        sys.exit(0)
+    print("", file=sys.stderr)
     return True
 
 
 def main():
-    parser = argparse.ArgumentParser(description='⚠️  WARNING: DELETES BLOCKS AND COMMENTS!\nDelete blocks from Notion page',
-                                     formatter_class=argparse.RawDescriptionHelpFormatter,
-                                     epilog=__doc__)
+    parser = argparse.ArgumentParser(
+        description="WARNING: DELETES BLOCKS AND COMMENTS!\nDelete blocks from Notion page",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
 
-    parser.add_argument('block_ids', nargs='*', help='Block IDs to delete')
-    parser.add_argument('--all', metavar='PAGE_ID', help='Delete all blocks in page')
-    parser.add_argument('--range', nargs=3, metavar=('PAGE_ID', 'START', 'END'),
-                      help='Delete range of blocks (positions)')
-    parser.add_argument('--yes', '-y', action='store_true',
-                       help='Skip confirmation prompt')
+    parser.add_argument("block_ids", nargs="*", help="Block IDs to delete")
+    parser.add_argument("--all", metavar="PAGE_ID", help="Delete all blocks in page")
+    parser.add_argument(
+        "--range",
+        nargs=3,
+        metavar=("PAGE_ID", "START", "END"),
+        help="Delete range of blocks (positions)",
+    )
+    parser.add_argument(
+        "--yes", "-y", action="store_true", help="Skip confirmation prompt"
+    )
 
     args = parser.parse_args()
 
@@ -68,96 +96,66 @@ def main():
         api_key = load_api_key()
 
         if args.all:
-            # Delete all blocks
             page_id = parse_notion_id(args.all)
-            print(f"Getting all blocks from page...", file=sys.stderr)
+            print("Getting all blocks from page...", file=sys.stderr)
             blocks = get_all_blocks(page_id, api_key)
+            block_ids = [b["id"] for b in blocks]
 
-            # Safety confirmation
             if not args.yes:
-                print("\n" + "="*70, file=sys.stderr)
-                print("⚠️  WARNING: DANGEROUS OPERATION", file=sys.stderr)
-                print("="*70, file=sys.stderr)
-                print(f"\nThis will DELETE {len(blocks)} BLOCKS and their COMMENTS!", file=sys.stderr)
-                print("\n" + "="*70, file=sys.stderr)
-                response = input("\nType 'yes' to delete all blocks and proceed: ")
-                if response != 'yes':
-                    print("Cancelled", file=sys.stderr)
-                    sys.exit(0)
-                print("", file=sys.stderr)
+                confirm_delete(len(block_ids))
 
-            print(f"Deleting {len(blocks)} blocks...", file=sys.stderr)
-            deleted = 0
-            for block in blocks:
-                if delete_block(block['id'], api_key):
-                    deleted += 1
-
-            print(json.dumps({'success': True, 'deleted': deleted}, indent=2))
+            print(f"Deleting {len(block_ids)} blocks concurrently...", file=sys.stderr)
+            deleted, failed = concurrent_deletes(block_ids, api_key)
+            print(
+                json.dumps(
+                    {"success": failed == 0, "deleted": deleted, "failed": failed},
+                    indent=2,
+                )
+            )
 
         elif args.range:
-            # Delete range
             page_id = parse_notion_id(args.range[0])
             start = int(args.range[1])
             end = int(args.range[2])
 
-            print(f"Getting blocks...", file=sys.stderr)
+            print("Getting blocks...", file=sys.stderr)
             blocks = get_all_blocks(page_id, api_key)
+            to_delete = [b["id"] for b in blocks[start:end]]
 
-            to_delete = blocks[start:end]
-
-            # Safety confirmation
             if not args.yes:
-                print("\n" + "="*70, file=sys.stderr)
-                print("⚠️  WARNING: DANGEROUS OPERATION", file=sys.stderr)
-                print("="*70, file=sys.stderr)
-                print(f"\nThis will DELETE {len(to_delete)} BLOCKS (positions {start}-{end}) and their COMMENTS!", file=sys.stderr)
-                print("\n" + "="*70, file=sys.stderr)
-                response = input("\nType 'yes' to delete blocks and proceed: ")
-                if response != 'yes':
-                    print("Cancelled", file=sys.stderr)
-                    sys.exit(0)
-                print("", file=sys.stderr)
+                confirm_delete(len(to_delete), f" (positions {start}-{end})")
 
-            print(f"Deleting {len(to_delete)} blocks...", file=sys.stderr)
-
-            deleted = 0
-            for block in to_delete:
-                if delete_block(block['id'], api_key):
-                    deleted += 1
-
-            print(json.dumps({'success': True, 'deleted': deleted}, indent=2))
+            print(f"Deleting {len(to_delete)} blocks concurrently...", file=sys.stderr)
+            deleted, failed = concurrent_deletes(to_delete, api_key)
+            print(
+                json.dumps(
+                    {"success": failed == 0, "deleted": deleted, "failed": failed},
+                    indent=2,
+                )
+            )
 
         else:
-            # Delete specific blocks
             block_ids = [parse_notion_id(bid) for bid in args.block_ids]
 
-            # Safety confirmation
             if not args.yes:
-                print("\n" + "="*70, file=sys.stderr)
-                print("⚠️  WARNING: DANGEROUS OPERATION", file=sys.stderr)
-                print("="*70, file=sys.stderr)
-                print(f"\nThis will DELETE {len(block_ids)} BLOCKS and their COMMENTS!", file=sys.stderr)
-                print("\n" + "="*70, file=sys.stderr)
-                response = input("\nType 'yes' to delete blocks and proceed: ")
-                if response != 'yes':
-                    print("Cancelled", file=sys.stderr)
-                    sys.exit(0)
-                print("", file=sys.stderr)
+                confirm_delete(len(block_ids))
 
-            print(f"Deleting {len(block_ids)} blocks...", file=sys.stderr)
-            deleted = 0
-            for block_id in block_ids:
-                if delete_block(block_id, api_key):
-                    deleted += 1
-
-            print(json.dumps({'success': True, 'deleted': deleted}, indent=2))
+            print(f"Deleting {len(block_ids)} blocks concurrently...", file=sys.stderr)
+            deleted, failed = concurrent_deletes(block_ids, api_key)
+            print(
+                json.dumps(
+                    {"success": failed == 0, "deleted": deleted, "failed": failed},
+                    indent=2,
+                )
+            )
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

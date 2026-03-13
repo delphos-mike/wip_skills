@@ -15,15 +15,11 @@ Examples:
     # Update from file
     update_block.py <block_id> --file content.txt
 """
+
 import argparse
 import json
-import os
-import re
-import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Any
-from urllib.parse import urlparse
 
 from notion_utils import (
     load_api_key,
@@ -37,42 +33,42 @@ def update_block(block_id: str, content: str, api_key: str, block_type: str = No
     """Update an existing block."""
 
     # Get current block to determine type
-    block = api_call(f'blocks/{block_id}', api_key)
+    block = api_call(f"blocks/{block_id}", api_key)
 
-    if 'object' in block and block['object'] == 'error':
+    if "object" in block and block["object"] == "error":
         print(f"Error: {block.get('message', 'Unknown error')}", file=sys.stderr)
         sys.exit(1)
 
-    current_type = block.get('type', 'paragraph')
+    current_type = block.get("type", "paragraph")
 
     # Use specified type or keep current
     update_type = block_type or current_type
 
     # Build update payload based on type
-    if update_type == 'paragraph':
+    if update_type == "paragraph":
         data = {"paragraph": {"rich_text": create_rich_text(content)}}
-    elif update_type.startswith('heading_'):
+    elif update_type.startswith("heading_"):
         data = {update_type: {"rich_text": create_rich_text(content)}}
-    elif update_type == 'bulleted_list_item':
+    elif update_type == "bulleted_list_item":
         data = {"bulleted_list_item": {"rich_text": create_rich_text(content)}}
-    elif update_type == 'numbered_list_item':
+    elif update_type == "numbered_list_item":
         data = {"numbered_list_item": {"rich_text": create_rich_text(content)}}
-    elif update_type == 'to_do':
+    elif update_type == "to_do":
         # Preserve checked state
-        checked = block.get(update_type, {}).get('checked', False)
+        checked = block.get(update_type, {}).get("checked", False)
         data = {"to_do": {"rich_text": create_rich_text(content), "checked": checked}}
-    elif update_type == 'quote':
+    elif update_type == "quote":
         data = {"quote": {"rich_text": create_rich_text(content)}}
-    elif update_type == 'code':
-        language = block.get(update_type, {}).get('language', 'plain text')
+    elif update_type == "code":
+        language = block.get(update_type, {}).get("language", "plain text")
         data = {"code": {"rich_text": create_rich_text(content), "language": language}}
     else:
         data = {"paragraph": {"rich_text": create_rich_text(content)}}
 
     # Update block
-    response = api_call(f'blocks/{block_id}', api_key, 'PATCH', data)
+    response = api_call(f"blocks/{block_id}", api_key, "PATCH", data)
 
-    if 'object' in response and response['object'] == 'error':
+    if "object" in response and response["object"] == "error":
         print(f"Error: {response.get('message', 'Unknown error')}", file=sys.stderr)
         sys.exit(1)
 
@@ -80,16 +76,18 @@ def update_block(block_id: str, content: str, api_key: str, block_type: str = No
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Update existing Notion block',
-                                     formatter_class=argparse.RawDescriptionHelpFormatter,
-                                     epilog=__doc__)
-    parser.add_argument('block_id', help='Block ID to update')
+    parser = argparse.ArgumentParser(
+        description="Update existing Notion block",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument("block_id", help="Block ID to update")
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--text', help='New text content')
-    group.add_argument('--file', help='File with new content')
+    group.add_argument("--text", help="New text content")
+    group.add_argument("--file", help="File with new content")
 
-    parser.add_argument('--type', help='Block type (paragraph, heading_1, etc.)')
+    parser.add_argument("--type", help="Block type (paragraph, heading_1, etc.)")
 
     args = parser.parse_args()
 
@@ -109,14 +107,15 @@ def main():
         print(f"Updating block {block_id}...", file=sys.stderr)
         result = update_block(block_id, content, api_key, args.type)
 
-        print(json.dumps({'success': True, 'block_id': block_id}, indent=2))
+        print(json.dumps({"success": True, "block_id": block_id}, indent=2))
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

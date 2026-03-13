@@ -14,23 +14,20 @@ Examples:
 
 Warning: This will delete ALL blocks from the page!
 """
+
 import argparse
 import json
 import sys
 from typing import Dict, List
 
-from notion_utils import load_api_key, parse_notion_id, api_call, get_all_blocks
-
-
-def delete_block(block_id: str, api_key: str) -> bool:
-    """Delete a single block."""
-    response = api_call(f'blocks/{block_id}', api_key, 'DELETE')
-
-    if 'object' in response and response['object'] == 'error':
-        print(f"Error deleting {block_id}: {response.get('message')}", file=sys.stderr)
-        return False
-
-    return True
+from notion_utils import (
+    load_api_key,
+    parse_notion_id,
+    api_call,
+    get_all_blocks,
+    concurrent_deletes,
+    is_interactive,
+)
 
 
 def clear_page(page_id: str, api_key: str):
@@ -40,38 +37,30 @@ def clear_page(page_id: str, api_key: str):
 
     if not blocks:
         print("Page is already empty", file=sys.stderr)
-        return {'success': True, 'deleted': 0}
+        return {"success": True, "deleted": 0}
 
-    print(f"Deleting {len(blocks)} blocks...", file=sys.stderr)
-    deleted = 0
-    failed = 0
-
-    for idx, block in enumerate(blocks, 1):
-        if delete_block(block['id'], api_key):
-            deleted += 1
-        else:
-            failed += 1
-
-        if idx % 10 == 0:
-            print(f"  Progress: {idx}/{len(blocks)} blocks...", file=sys.stderr)
+    print(f"Deleting {len(blocks)} blocks concurrently...", file=sys.stderr)
+    block_ids = [block["id"] for block in blocks]
+    deleted, failed = concurrent_deletes(block_ids, api_key)
 
     return {
-        'success': failed == 0,
-        'deleted': deleted,
-        'failed': failed,
-        'total': len(blocks)
+        "success": failed == 0,
+        "deleted": deleted,
+        "failed": failed,
+        "total": len(blocks),
     }
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Clear all content from a Notion page',
+        description="Clear all content from a Notion page",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
-    parser.add_argument('page_id', help='Page ID or URL to clear')
-    parser.add_argument('--yes', '-y', action='store_true',
-                       help='Skip confirmation prompt')
+    parser.add_argument("page_id", help="Page ID or URL to clear")
+    parser.add_argument(
+        "--yes", "-y", action="store_true", help="Skip confirmation prompt"
+    )
 
     args = parser.parse_args()
 
@@ -79,29 +68,45 @@ def main():
         api_key = load_api_key()
         page_id = parse_notion_id(args.page_id)
 
-        # Confirmation (unless --yes)
+        # Confirmation (unless --yes or non-interactive)
         if not args.yes:
-            print("⚠️  WARNING: This will delete ALL blocks from the page!", file=sys.stderr)
+            if not is_interactive():
+                print(
+                    "Error: confirmation required. Use --yes to skip in non-interactive mode.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            print(
+                "WARNING: This will delete ALL blocks from the page!",
+                file=sys.stderr,
+            )
             response = input("Are you sure? (yes/no): ")
-            if response.lower() not in ['yes', 'y']:
+            if response.lower() not in ["yes", "y"]:
                 print("Cancelled", file=sys.stderr)
                 sys.exit(0)
 
         result = clear_page(page_id, api_key)
 
-        if result['success']:
-            print(f"✓ Successfully cleared page ({result['deleted']} blocks deleted)", file=sys.stderr)
+        if result["success"]:
+            print(
+                f"✓ Successfully cleared page ({result['deleted']} blocks deleted)",
+                file=sys.stderr,
+            )
         else:
-            print(f"⚠ Partial success: {result['deleted']} deleted, {result['failed']} failed", file=sys.stderr)
+            print(
+                f"⚠ Partial success: {result['deleted']} deleted, {result['failed']} failed",
+                file=sys.stderr,
+            )
 
         print(json.dumps(result, indent=2))
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
