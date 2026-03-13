@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -158,55 +159,63 @@ except ImportError:
 _RATE_LIMIT_CALLS = 3
 _RATE_LIMIT_PERIOD = 1.0  # seconds
 _last_call_times: List[float] = []
+_rate_limit_lock = threading.Lock()
 
 
 def rate_limit(func: Callable) -> Callable:
-    """Decorator to enforce rate limiting (3 requests per second)."""
+    """Decorator to enforce rate limiting (3 requests per second). Thread-safe.
+
+    Computes the required sleep outside the lock so concurrent threads
+    can overlap their waits instead of serializing through the lock.
+    """
 
     @wraps(func)
     def wrapper(*args, **kwargs):
         global _last_call_times
-        current_time = time.time()
+        sleep_time = 0.0
 
-        # Remove calls older than the rate limit period
-        _last_call_times = [
-            t for t in _last_call_times if current_time - t < _RATE_LIMIT_PERIOD
-        ]
+        with _rate_limit_lock:
+            current_time = time.time()
 
-        # If at limit, wait
-        if len(_last_call_times) >= _RATE_LIMIT_CALLS:
-            sleep_time = _RATE_LIMIT_PERIOD - (current_time - _last_call_times[0])
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-            _last_call_times.pop(0)
+            # Remove calls older than the rate limit period
+            _last_call_times = [
+                t for t in _last_call_times if current_time - t < _RATE_LIMIT_PERIOD
+            ]
 
-        _last_call_times.append(time.time())
+            # If at limit, compute wait time but don't sleep yet
+            if len(_last_call_times) >= _RATE_LIMIT_CALLS:
+                sleep_time = _RATE_LIMIT_PERIOD - (current_time - _last_call_times[0])
+                _last_call_times.pop(0)
+
+            # Reserve our slot now (using projected time after sleep)
+            _last_call_times.append(current_time + max(sleep_time, 0))
+
+        # Sleep outside the lock so other threads can compute their waits
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
         return func(*args, **kwargs)
 
     return wrapper
 
 
 def load_api_key() -> str:
-    """Load Notion API key from environment or config file.
+    """Load Notion API key from NOTION_API_KEY environment variable.
 
     Returns:
         str: Notion API key
 
     Raises:
-        ValueError: If API key not found
+        ValueError: If NOTION_API_KEY is not set
     """
     api_key = os.environ.get("NOTION_API_KEY")
     if api_key:
         return api_key
 
-    env_file = Path.home() / ".envs" / "notion.env"
-    if env_file.exists():
-        with open(env_file) as f:
-            for line in f:
-                if line.startswith("NOTION_API_KEY="):
-                    return line.strip().split("=", 1)[1]
-
-    raise ValueError("NOTION_API_KEY not found in environment or ~/.envs/notion.env")
+    raise ValueError(
+        "NOTION_API_KEY environment variable is not set. "
+        "Export it or add it to your shell profile."
+    )
 
 
 def parse_notion_id(id_input: str) -> str:
@@ -359,6 +368,8 @@ def extract_rich_text(rich_text: List[Dict]) -> str:
 def get_all_blocks(block_id: str, api_key: str) -> List[Dict[str, Any]]:
     """Get all blocks recursively with pagination support.
 
+    Fetches children concurrently for blocks that have them.
+
     Args:
         block_id: Parent block/page ID
         api_key: Notion API key
@@ -377,17 +388,37 @@ def get_all_blocks(block_id: str, api_key: str) -> List[Dict[str, Any]]:
         response = api_call(endpoint, api_key)
 
         if "results" in response:
-            for block in response["results"]:
-                blocks.append(block)
-                # Recursively get children if block has them
-                if block.get("has_children"):
-                    children = get_all_blocks(block["id"], api_key)
-                    block["children"] = children
+            blocks.extend(response["results"])
 
         if not response.get("has_more", False):
             break
 
         cursor = response.get("next_cursor")
+
+    # Fetch children concurrently for blocks that have them
+    blocks_with_children = [b for b in blocks if b.get("has_children")]
+    if blocks_with_children:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def fetch_children(block):
+            children = get_all_blocks(block["id"], api_key)
+            return block["id"], children
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {
+                executor.submit(fetch_children, b): b for b in blocks_with_children
+            }
+            children_map = {}
+            for future in as_completed(futures):
+                try:
+                    bid, children = future.result()
+                    children_map[bid] = children
+                except Exception:
+                    pass  # Skip failed child fetches
+
+            for block in blocks:
+                if block["id"] in children_map:
+                    block["children"] = children_map[block["id"]]
 
     return blocks
 

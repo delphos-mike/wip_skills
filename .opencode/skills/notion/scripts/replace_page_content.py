@@ -26,6 +26,7 @@ Safer alternative:
     # ... edit page.json ...
     sync_page.py <page_id> page.json
 """
+
 import argparse
 import json
 import sys
@@ -38,15 +39,14 @@ from notion_utils import (
     api_call,
     get_all_blocks,
     markdown_to_blocks,
-    create_rich_text
+    create_rich_text,
+    concurrent_deletes,
 )
-
-
 
 
 def delete_block(block_id: str, api_key: str):
     """Delete a block."""
-    api_call(f'blocks/{block_id}', api_key, 'DELETE')
+    api_call(f"blocks/{block_id}", api_key, "DELETE")
 
 
 def replace_content(page_id: str, new_blocks: List[Dict], api_key: str):
@@ -56,20 +56,23 @@ def replace_content(page_id: str, new_blocks: List[Dict], api_key: str):
     print("Getting existing blocks...", file=sys.stderr)
     existing = get_all_blocks(page_id, api_key)
 
-    # Delete all existing blocks
-    print(f"Deleting {len(existing)} existing blocks...", file=sys.stderr)
-    for block in existing:
-        delete_block(block['id'], api_key)
+    # Delete all existing blocks concurrently
+    if existing:
+        print(f"Deleting {len(existing)} existing blocks...", file=sys.stderr)
+        block_ids = [b["id"] for b in existing]
+        deleted, failed = concurrent_deletes(block_ids, api_key)
+        if failed:
+            print(f"  Warning: {failed} blocks failed to delete", file=sys.stderr)
 
-    # Add new content
+    # Add new content in batches
     print(f"Adding {len(new_blocks)} new blocks...", file=sys.stderr)
     batch_size = 100
     for i in range(0, len(new_blocks), batch_size):
-        batch = new_blocks[i:i+batch_size]
+        batch = new_blocks[i : i + batch_size]
         data = {"children": batch}
-        response = api_call(f'blocks/{page_id}/children', api_key, 'PATCH', data)
+        response = api_call(f"blocks/{page_id}/children", api_key, "PATCH", data)
 
-        if 'object' in response and response['object'] == 'error':
+        if "object" in response and response["object"] == "error":
             print(f"Error: {response.get('message')}", file=sys.stderr)
             sys.exit(1)
 
@@ -77,17 +80,20 @@ def replace_content(page_id: str, new_blocks: List[Dict], api_key: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='⚠️  WARNING: DELETES ALL BLOCKS AND COMMENTS!\nReplace entire page content',
-                                     formatter_class=argparse.RawDescriptionHelpFormatter,
-                                     epilog=__doc__)
-    parser.add_argument('page_id', help='Page ID')
+    parser = argparse.ArgumentParser(
+        description="⚠️  WARNING: DELETES ALL BLOCKS AND COMMENTS!\nReplace entire page content",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument("page_id", help="Page ID")
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--markdown', help='Markdown content')
-    group.add_argument('--file', help='Markdown file')
+    group.add_argument("--markdown", help="Markdown content")
+    group.add_argument("--file", help="Markdown file")
 
-    parser.add_argument('--yes', '-y', action='store_true',
-                       help='Skip confirmation prompt')
+    parser.add_argument(
+        "--yes", "-y", action="store_true", help="Skip confirmation prompt"
+    )
 
     args = parser.parse_args()
 
@@ -107,31 +113,34 @@ def main():
 
         # Safety confirmation
         if not args.yes:
-            print("\n" + "="*70, file=sys.stderr)
+            print("\n" + "=" * 70, file=sys.stderr)
             print("⚠️  WARNING: DANGEROUS OPERATION", file=sys.stderr)
-            print("="*70, file=sys.stderr)
+            print("=" * 70, file=sys.stderr)
             print("\nThis will DELETE ALL BLOCKS and their COMMENTS!", file=sys.stderr)
             print("\n💡 Safer alternative (preserves comments):", file=sys.stderr)
-            print("   read_page.py <page_id> --output json > page.json", file=sys.stderr)
+            print(
+                "   read_page.py <page_id> --output json > page.json", file=sys.stderr
+            )
             print("   # ... edit page.json ...", file=sys.stderr)
             print("   sync_page.py <page_id> page.json", file=sys.stderr)
-            print("\n" + "="*70, file=sys.stderr)
+            print("\n" + "=" * 70, file=sys.stderr)
             response = input("\nType 'yes' to delete all content and proceed: ")
-            if response != 'yes':
+            if response != "yes":
                 print("Cancelled", file=sys.stderr)
                 sys.exit(0)
             print("", file=sys.stderr)
 
         replace_content(page_id, blocks, api_key)
 
-        print(json.dumps({'success': True, 'blocks_added': len(blocks)}, indent=2))
+        print(json.dumps({"success": True, "blocks_added": len(blocks)}, indent=2))
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

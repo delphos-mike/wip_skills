@@ -255,9 +255,10 @@ Invalid request parameters:
 1. Go to [https://www.notion.so/my-integrations](https://www.notion.so/my-integrations)
 2. Create a new integration
 3. Copy the "Internal Integration Token"
-4. Save to `~/.envs/notion.env`:
+4. Export the key in your shell:
    ```bash
-   NOTION_API_KEY=ntn_...
+   export NOTION_API_KEY=ntn_...
+   # Add to your shell profile (~/.zshrc, ~/.bashrc) for persistence
    ```
 5. Share pages with your integration:
    - Open the page in Notion

@@ -30,6 +30,8 @@ from notion_utils import (
     parse_notion_id,
     get_all_blocks,
     is_interactive,
+    concurrent_api_calls,
+    concurrent_deletes,
 )
 
 
@@ -143,7 +145,7 @@ def sync_blocks(
     delete_removed: bool = False,
     force: bool = False,
 ):
-    """Sync blocks with minimal changes.
+    """Sync blocks with minimal changes, using concurrent API calls.
 
     Args:
         page_id: Parent page ID
@@ -199,39 +201,49 @@ def sync_blocks(
             else:
                 print(f"Matching confidence: {confidence:.1%}", file=sys.stderr)
 
-    # Simple strategy: match by position and type
+    # Identify blocks that need updating
+    updates = []
     for i in range(min(len(old_blocks), len(new_blocks))):
         old_block = old_blocks[i]
         new_block = new_blocks[i]
 
         if blocks_match(old_block, new_block):
             stats["unchanged"] += 1
-            print(f"  [{i + 1}] Unchanged", file=sys.stderr)
         else:
-            # Update in place (preserves comments)
-            print(f"  [{i + 1}] Updating...", file=sys.stderr)
-            update_block(old_block["id"], new_block, api_key)
-            stats["updated"] += 1
+            updates.append((old_block["id"], new_block))
 
-    # New blocks to add
+    # Run updates concurrently
+    if updates:
+        print(f"  Updating {len(updates)} blocks concurrently...", file=sys.stderr)
+
+        def do_update(item):
+            block_id, new_block = item
+            return update_block(block_id, new_block, api_key)
+
+        results = concurrent_api_calls(updates, do_update, label="updates")
+        stats["updated"] = sum(1 for _, r in results if r is not None)
+
+    # Batch-create new blocks (up to 100 per API call)
     if len(new_blocks) > len(old_blocks):
-        print(
-            f"  Adding {len(new_blocks) - len(old_blocks)} new blocks...",
-            file=sys.stderr,
-        )
-        for block in new_blocks[len(old_blocks) :]:
-            create_block(page_id, block, api_key)
-            stats["created"] += 1
+        new_to_create = new_blocks[len(old_blocks) :]
+        batch_size = 100
+        print(f"  Creating {len(new_to_create)} new blocks...", file=sys.stderr)
 
-    # Old blocks to remove (only if --delete-removed)
+        for i in range(0, len(new_to_create), batch_size):
+            batch = new_to_create[i : i + batch_size]
+            data = {"children": batch}
+            api_call(f"blocks/{page_id}/children", api_key, "PATCH", data)
+            stats["created"] += len(batch)
+
+    # Delete removed blocks concurrently
     if delete_removed and len(old_blocks) > len(new_blocks):
+        blocks_to_delete = [b["id"] for b in old_blocks[len(new_blocks) :]]
         print(
-            f"  ⚠️  Deleting {len(old_blocks) - len(new_blocks)} blocks (COMMENTS WILL BE LOST)...",
+            f"  Deleting {len(blocks_to_delete)} blocks (COMMENTS WILL BE LOST)...",
             file=sys.stderr,
         )
-        for block in old_blocks[len(new_blocks) :]:
-            delete_block(block["id"], api_key)
-            stats["deleted"] += 1
+        deleted, failed = concurrent_deletes(blocks_to_delete, api_key)
+        stats["deleted"] = deleted
 
     return stats
 

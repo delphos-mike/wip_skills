@@ -99,8 +99,8 @@ All markdown scripts support:
 ## Setup
 
 ```bash
-# ~/.envs/notion.env
-NOTION_API_KEY=ntn_...
+# Set in your shell environment
+export NOTION_API_KEY=ntn_...
 ```
 
 ## All Commands

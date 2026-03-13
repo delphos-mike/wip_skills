@@ -42,21 +42,19 @@ fi
 echo "==> Verifying installation..."
 python3 -c "import requests; print(f'✓ requests {requests.__version__}')"
 
-# Create config directory if needed
-mkdir -p "$HOME/.envs"
-
-# Check for API key
-if [ ! -f "$HOME/.envs/notion.env" ]; then
+# Check for API key in environment
+if [ -z "${NOTION_API_KEY:-}" ]; then
     echo ""
-    echo "⚠️  Notion API key not configured!"
+    echo "⚠️  NOTION_API_KEY not set in environment!"
     echo ""
     echo "To complete setup:"
     echo "  1. Create integration at https://www.notion.so/my-integrations"
     echo "  2. Copy your API key"
-    echo "  3. Run: echo 'NOTION_API_KEY=secret_...' > ~/.envs/notion.env"
+    echo "  3. Export it: export NOTION_API_KEY=ntn_..."
+    echo "     (add to your shell profile for persistence)"
     echo ""
 else
-    echo "✓ Notion API key configured"
+    echo "✓ NOTION_API_KEY found in environment"
 fi
 
 echo ""

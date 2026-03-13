@@ -6,8 +6,8 @@ Complete Notion document management via API. Search, read, write, update, delete
 
 ```bash
 # 1. Configure API key
-mkdir -p ~/.envs
-echo "NOTION_API_KEY=ntn_..." > ~/.envs/notion.env
+export NOTION_API_KEY=ntn_...
+# (add to your shell profile to persist)
 
 # 2. Share integration with your Notion pages
 # In Notion: Page → ••• → Connections → Add your integration
@@ -49,7 +49,7 @@ scripts/run read_page.py <page-id>
 
 1. Clone the repo containing this skill
 2. Create a Notion integration at [notion.so/my-integrations](https://www.notion.so/my-integrations)
-3. Add API key to `~/.envs/notion.env`
+3. Export `NOTION_API_KEY` in your environment
 4. Share pages with the integration in Notion
 5. Run any script — auto-bootstrap handles the rest
 
@@ -80,7 +80,7 @@ Delete `.venv/` in the skill directory and run any script — it will re-bootstr
 
 ### API key issues
 ```bash
-cat ~/.envs/notion.env  # Should show NOTION_API_KEY=ntn_...
+echo $NOTION_API_KEY  # Should show ntn_...
 ```
 
 ### Permission issues

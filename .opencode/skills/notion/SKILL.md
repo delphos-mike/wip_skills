@@ -20,8 +20,8 @@ python3 .opencode/skills/notion/scripts/search_pages.py "query"
 skill directory and install dependencies (prefers `uv`, falls back to `pip`).
 No manual setup required.
 
-**Environment:** Scripts load `NOTION_API_KEY` from `~/.envs/notion.env`. The
-user must create a Notion integration and share it with their pages.
+**Environment:** Scripts read `NOTION_API_KEY` from the environment. The user
+must create a Notion integration and share it with their pages.
 
 ## Comment Preservation (CRITICAL)
 
