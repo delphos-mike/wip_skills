@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Setup script for Notion skill
+# Follows "Scripts to Rule Them All" pattern
+
+set -e
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VENV_DIR="$SKILL_DIR/.venv"
+
+echo "==> Bootstrapping Notion skill..."
+
+# Check for Python 3
+if ! command -v python3 &> /dev/null; then
+    echo "Error: python3 not found. Please install Python 3.8 or later."
+    exit 1
+fi
+
+# Create virtual environment if it doesn't exist
+if [ ! -d "$VENV_DIR" ]; then
+    echo "==> Creating Python virtual environment..."
+    python3 -m venv "$VENV_DIR"
+fi
+
+# Activate virtual environment
+echo "==> Activating virtual environment..."
+source "$VENV_DIR/bin/activate"
+
+# Upgrade pip
+echo "==> Upgrading pip..."
+pip install --quiet --upgrade pip
+
+# Install dependencies
+echo "==> Installing dependencies..."
+if [ -f "$SKILL_DIR/requirements.txt" ]; then
+    pip install --quiet -r "$SKILL_DIR/requirements.txt"
+else
+    # Fallback if requirements.txt doesn't exist yet
+    pip install --quiet requests
+fi
+
+# Verify installation
+echo "==> Verifying installation..."
+python3 -c "import requests; print(f'✓ requests {requests.__version__}')"
+
+# Create config directory if needed
+mkdir -p "$HOME/.envs"
+
+# Check for API key
+if [ ! -f "$HOME/.envs/notion.env" ]; then
+    echo ""
+    echo "⚠️  Notion API key not configured!"
+    echo ""
+    echo "To complete setup:"
+    echo "  1. Create integration at https://www.notion.so/my-integrations"
+    echo "  2. Copy your API key"
+    echo "  3. Run: echo 'NOTION_API_KEY=secret_...' > ~/.envs/notion.env"
+    echo ""
+else
+    echo "✓ Notion API key configured"
+fi
+
+echo ""
+echo "✓ Bootstrap complete!"
+echo ""
+echo "The virtual environment is at: $VENV_DIR"
+echo "Scripts will automatically use this environment."
