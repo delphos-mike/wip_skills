@@ -27,6 +27,8 @@
 | **Find section** | `find_section.py <page_id> "Heading Text"` | N/A |
 | **Link pages** | `link_pages.py <source> <target1> <target2>` | ✅ |
 | **Extract comments** | `extract_comments.py <page_id>` | N/A |
+| **Create comment** | `create_comment.py <page_id> "text"` | N/A |
+| **Reply to comment** | `reply_to_comment.py <page_id> <disc_id> "text"` | N/A |
 | **Summarize comments** | `summarize_comments.py comments.json` | N/A |
 
 ## Common Patterns
@@ -54,6 +56,13 @@ extract_comments.py <page_id>
 summarize_comments.py /tmp/<page>_comments.json
 ```
 
+### Comment Thread
+```bash
+create_comment.py <page_id> "Initial thought"
+# Get discussion_id from JSON output, then reply:
+reply_to_comment.py <page_id> <discussion_id> "Follow-up"
+```
+
 ## Decision Tree
 
 ```
@@ -73,6 +82,10 @@ READ/SEARCH
   ├─ Find page → search_pages.py
   ├─ Read content → read_page.py
   └─ Get comments → extract_comments.py
+
+COMMENT
+  ├─ Add comment → create_comment.py
+  └─ Reply to thread → reply_to_comment.py
 ```
 
 ## Markdown Support
@@ -134,6 +147,9 @@ link_pages.py <source_page> <target_page1> [<target_page2> ...]
 
 # Comments
 extract_comments.py <page_id>
+create_comment.py <page_id> "text"
+create_comment.py <page_id> --file comment.txt
+reply_to_comment.py <page_id> <discussion_id> "reply text"
 summarize_comments.py <comments_json>
 ```
 

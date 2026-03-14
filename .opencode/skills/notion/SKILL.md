@@ -126,11 +126,25 @@ clear_page.py <page_id> [--yes]
 
 ### Comments
 
+**create_comment.py** — Create a page-level comment
+```bash
+create_comment.py <page_url_or_id> "Comment text"
+create_comment.py <page_url_or_id> --file comment.txt
+```
+Supports inline markdown: `**bold**`, `*italic*`, `` `code` ``.
+
+**reply_to_comment.py** — Reply to a discussion thread
+```bash
+reply_to_comment.py <page_url_or_id> <discussion_id> "Reply text"
+```
+Get `discussion_id` from `extract_comments.py` output or `create_comment.py` output.
+
 **extract_comments.py** — Extract all comments with block context
 ```bash
 extract_comments.py <page_url_or_id>
 ```
-Writes `/tmp/<page_name>_comments.json` with comment text, author,
+Fetches both page-level and block-level comments. Writes
+`/tmp/<page_name>_comments.json` with comment text, author,
 timestamps, discussion threads, and deep links.
 
 **summarize_comments.py** — Human-readable comment summary
@@ -154,6 +168,14 @@ extract_comments.py <page_url>
 summarize_comments.py /tmp/<page_name>_comments.json
 ```
 
+### Comment Thread
+```bash
+# Create a comment
+create_comment.py <page_id> "Initial thought"
+# Get the discussion_id from the JSON output, then reply:
+reply_to_comment.py <page_id> <discussion_id> "Follow-up"
+```
+
 ### Bulk Update
 ```bash
 search_pages.py "Weekly Report" --output json > pages.json
@@ -172,6 +194,8 @@ User wants to ADD:
   "Add to end"      → append_blocks.py
   "Insert at top"   → insert_block.py --position 0
   "Insert after X"  → find_section.py + insert_block.py --after
+  "Add comment"     → create_comment.py
+  "Reply to comment"→ reply_to_comment.py
 
 User wants to EDIT:
   "Update page"     → ASK about comments first!

@@ -113,7 +113,50 @@ def extract_comments(page_id: str, api_key: str, output_dir: Path) -> Dict[str, 
     all_comments = []
     blocks_with_comments = 0
 
-    print(f"\nFetching comments for all blocks concurrently...", file=sys.stderr)
+    # Fetch page-level comments first (comments not attached to a specific block)
+    print(f"\nFetching page-level comments...", file=sys.stderr)
+    page_level_comments = []
+    cursor = None
+    while True:
+        endpoint = f"comments?block_id={page_id}"
+        if cursor:
+            endpoint += f"&start_cursor={cursor}"
+        response = api_call(endpoint, api_key)
+        page_level_comments.extend(response.get("results", []))
+        if not response.get("has_more", False):
+            break
+        cursor = response.get("next_cursor")
+
+    if page_level_comments:
+        print(f"  Page-level: {len(page_level_comments)} comments", file=sys.stderr)
+        for comment in page_level_comments:
+            comment_text = "".join(
+                [rt.get("plain_text", "") for rt in comment.get("rich_text", [])]
+            )
+            discussion_id = comment.get("discussion_id")
+            comment_link = (
+                build_comment_link(page_id, discussion_id) if discussion_id else None
+            )
+            comment_info = {
+                "page_id": page_id,
+                "page_title": page_title,
+                "block_id": page_id,
+                "block_type": "page",
+                "block_context": f"[Page: {page_title}]",
+                "comment_id": comment.get("id"),
+                "comment_text": comment_text,
+                "created_by": comment.get("created_by", {}).get("id"),
+                "created_time": comment.get("created_time"),
+                "last_edited_time": comment.get("last_edited_time"),
+                "discussion_id": discussion_id,
+                "comment_link": comment_link,
+            }
+            all_comments.append(comment_info)
+
+    # Fetch block-level comments concurrently
+    print(
+        f"Fetching comments for {len(blocks)} blocks concurrently...", file=sys.stderr
+    )
 
     def fetch_comments_for_block(block):
         """Fetch comments for a single block (runs in thread pool)."""
@@ -164,8 +207,11 @@ def extract_comments(page_id: str, api_key: str, output_dir: Path) -> Dict[str, 
 
             all_comments.append(comment_info)
 
+    page_level_count = len(page_level_comments)
+    block_level_count = len(all_comments) - page_level_count
     print(
-        f"\n✓ Found {len(all_comments)} comments across {blocks_with_comments} blocks",
+        f"\n✓ Found {len(all_comments)} comments "
+        f"({page_level_count} page-level, {block_level_count} on {blocks_with_comments} blocks)",
         file=sys.stderr,
     )
 
