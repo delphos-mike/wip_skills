@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """Create a comment on a Notion page or block.
 
-Creates page-level comments. To reply to an existing discussion thread,
-use reply_to_comment.py instead.
+Creates page-level or block-level comments. To reply to an existing
+discussion thread, use reply_to_comment.py instead.
 
 Usage:
     create_comment.py <page_url_or_id> "Comment text"
     create_comment.py <page_url_or_id> --file comment.txt
-    create_comment.py <page_url_or_id> --block <block_id> "Comment text"
+    create_comment.py --block <block_id> "Comment text"
 
 Examples:
     # Page-level comment
     create_comment.py https://www.notion.so/My-Page-abc123 "Looks good!"
 
-    # Comment referencing a specific block context
-    create_comment.py abc123 --block def456 "This paragraph needs revision"
+    # Block-level comment (attaches to a specific block)
+    create_comment.py --block def456 "This paragraph needs revision"
 
     # Comment from file
     create_comment.py abc123 --file review_notes.txt
@@ -31,29 +31,45 @@ from notion_utils import api_call, create_rich_text, load_api_key, parse_notion_
 
 def create_comment(
     api_key: str,
-    page_id: str,
     text: str,
+    page_id: Optional[str] = None,
+    block_id: Optional[str] = None,
     discussion_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create a comment on a Notion page.
+    """Create a comment on a Notion page, block, or discussion thread.
+
+    Exactly one of page_id, block_id, or discussion_id must be provided.
+    The Notion API requires these to be mutually exclusive.
 
     Args:
         api_key: Notion API key
-        page_id: Page ID to comment on
-        text: Comment text (supports inline markdown: **bold**, *italic*, `code`)
-        discussion_id: If provided, replies to an existing discussion thread
+        text: Comment text (supports inline markdown: **bold**, *italic*, `code`,
+              [link](url))
+        page_id: Page ID for page-level comments
+        block_id: Block ID for block-level comments
+        discussion_id: Discussion thread ID for replies
 
     Returns:
         dict: API response with comment details
+
+    Raises:
+        ValueError: If zero or multiple targets are provided
     """
+    targets = sum(1 for t in (page_id, block_id, discussion_id) if t)
+    if targets != 1:
+        raise ValueError(
+            "Exactly one of page_id, block_id, or discussion_id must be provided"
+        )
+
     rich_text = create_rich_text(text)
 
-    data: Dict[str, Any] = {
-        "parent": {"page_id": page_id},
-        "rich_text": rich_text,
-    }
+    data: Dict[str, Any] = {"rich_text": rich_text}
 
-    if discussion_id:
+    if page_id:
+        data["parent"] = {"page_id": page_id}
+    elif block_id:
+        data["parent"] = {"block_id": block_id}
+    elif discussion_id:
         data["discussion_id"] = discussion_id
 
     return api_call("comments", api_key, method="POST", data=data)
@@ -92,18 +108,27 @@ def get_page_comments(api_key: str, block_id: str) -> List[Dict[str, Any]]:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Create a comment on a Notion page",
+        description="Create a comment on a Notion page or block",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("page", help="Notion page URL or ID")
+    parser.add_argument(
+        "page", nargs="?", help="Notion page URL or ID (for page-level comments)"
+    )
     parser.add_argument("text", nargs="?", help="Comment text")
     parser.add_argument("--file", "-f", help="Read comment text from file")
     parser.add_argument(
-        "--block", "-b", help="Block ID to associate the comment with (contextual)"
+        "--block",
+        "-b",
+        help="Block ID to attach comment to (creates block-level comment)",
     )
 
     args = parser.parse_args()
+
+    # Validate: need either page or block
+    if not args.page and not args.block:
+        parser.error("Provide either a page ID or --block <block_id>")
+        return
 
     # Get comment text
     if args.file:
@@ -116,11 +141,15 @@ def main():
 
     try:
         api_key = load_api_key()
-        page_id = parse_notion_id(args.page)
 
-        print(f"Creating comment on page {page_id}...", file=sys.stderr)
-
-        result = create_comment(api_key, page_id, text)
+        if args.block:
+            block_id = parse_notion_id(args.block)
+            print(f"Creating comment on block {block_id}...", file=sys.stderr)
+            result = create_comment(api_key, text, block_id=block_id)
+        else:
+            page_id = parse_notion_id(args.page)
+            print(f"Creating comment on page {page_id}...", file=sys.stderr)
+            result = create_comment(api_key, text, page_id=page_id)
 
         if result.get("object") == "error":
             print(

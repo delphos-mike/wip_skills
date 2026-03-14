@@ -28,7 +28,8 @@
 | **Link pages** | `link_pages.py <source> <target1> <target2>` | ✅ |
 | **Extract comments** | `extract_comments.py <page_id>` | N/A |
 | **Create comment** | `create_comment.py <page_id> "text"` | N/A |
-| **Reply to comment** | `reply_to_comment.py <page_id> <disc_id> "text"` | N/A |
+| **Comment on block** | `create_comment.py --block <block_id> "text"` | N/A |
+| **Reply to comment** | `reply_to_comment.py <disc_id> "text"` | N/A |
 | **Summarize comments** | `summarize_comments.py comments.json` | N/A |
 
 ## Common Patterns
@@ -59,8 +60,10 @@ summarize_comments.py /tmp/<page>_comments.json
 ### Comment Thread
 ```bash
 create_comment.py <page_id> "Initial thought"
+# Or attach to a specific block:
+create_comment.py --block <block_id> "Comment on this block"
 # Get discussion_id from JSON output, then reply:
-reply_to_comment.py <page_id> <discussion_id> "Follow-up"
+reply_to_comment.py <discussion_id> "Follow-up"
 ```
 
 ## Decision Tree
@@ -84,7 +87,8 @@ READ/SEARCH
   └─ Get comments → extract_comments.py
 
 COMMENT
-  ├─ Add comment → create_comment.py
+  ├─ Page comment → create_comment.py <page_id>
+  ├─ Block comment → create_comment.py --block <block_id>
   └─ Reply to thread → reply_to_comment.py
 ```
 
@@ -93,7 +97,9 @@ COMMENT
 All markdown scripts support:
 - Headings: `#`, `##`, `###`
 - Lists: `-` bullets, `1.` numbered
+- **Nested lists**: indent with 2/4 spaces or tabs
 - Todos: `- [ ]`, `- [x]`
+- **Links**: `[text](url)`
 - **Tables**: `| Header | Header |`
 - Code: ` ```python `
 - Quotes: `> text`
@@ -147,9 +153,10 @@ link_pages.py <source_page> <target_page1> [<target_page2> ...]
 
 # Comments
 extract_comments.py <page_id>
-create_comment.py <page_id> "text"
+create_comment.py <page_id> "text"                     # page-level
+create_comment.py --block <block_id> "text"            # block-level
 create_comment.py <page_id> --file comment.txt
-reply_to_comment.py <page_id> <discussion_id> "reply text"
+reply_to_comment.py <discussion_id> "reply text"
 summarize_comments.py <comments_json>
 ```
 

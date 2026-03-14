@@ -126,16 +126,18 @@ clear_page.py <page_id> [--yes]
 
 ### Comments
 
-**create_comment.py** — Create a page-level comment
+**create_comment.py** — Create a page-level or block-level comment
 ```bash
-create_comment.py <page_url_or_id> "Comment text"
+create_comment.py <page_url_or_id> "Comment text"         # page-level
+create_comment.py --block <block_id> "Comment text"        # block-level
 create_comment.py <page_url_or_id> --file comment.txt
 ```
-Supports inline markdown: `**bold**`, `*italic*`, `` `code` ``.
+Supports inline markdown: `**bold**`, `*italic*`, `` `code` ``, `[text](url)`.
+Block-level comments attach to a specific block (paragraph, heading, etc.).
 
 **reply_to_comment.py** — Reply to a discussion thread
 ```bash
-reply_to_comment.py <page_url_or_id> <discussion_id> "Reply text"
+reply_to_comment.py <discussion_id> "Reply text"
 ```
 Get `discussion_id` from `extract_comments.py` output or `create_comment.py` output.
 
@@ -170,10 +172,12 @@ summarize_comments.py /tmp/<page_name>_comments.json
 
 ### Comment Thread
 ```bash
-# Create a comment
+# Page-level comment
 create_comment.py <page_id> "Initial thought"
+# Block-level comment (attaches to specific block)
+create_comment.py --block <block_id> "Comment on this block"
 # Get the discussion_id from the JSON output, then reply:
-reply_to_comment.py <page_id> <discussion_id> "Follow-up"
+reply_to_comment.py <discussion_id> "Follow-up"
 ```
 
 ### Bulk Update
@@ -194,7 +198,8 @@ User wants to ADD:
   "Add to end"      → append_blocks.py
   "Insert at top"   → insert_block.py --position 0
   "Insert after X"  → find_section.py + insert_block.py --after
-  "Add comment"     → create_comment.py
+  "Add comment"     → create_comment.py (page-level)
+  "Comment on block"→ create_comment.py --block <id>
   "Reply to comment"→ reply_to_comment.py
 
 User wants to EDIT:
@@ -213,9 +218,13 @@ User wants to DELETE:
 
 Scripts that accept `--markdown` or `--file` support: headings (`#`, `##`,
 `###`), bullet lists (`-`), numbered lists (`1.`), todos (`- [ ]`, `- [x]`),
-tables (`| H | H |`), code blocks (` ```lang `), quotes (`> `), dividers
-(`---`), inline formatting (`**bold**`, `*italic*`, `` `code` ``), and
-mermaid diagrams (` ```mermaid `).
+**nested lists** (indent with 2/4 spaces or tabs for sub-items), tables
+(`| H | H |`), code blocks (` ```lang `), quotes (`> `), dividers (`---`),
+inline formatting (`**bold**`, `*italic*`, `` `code` ``),
+**links** (`[text](url)`), and mermaid diagrams (` ```mermaid `).
+
+Nested lists support arbitrary depth and mixed types (bullets with numbered
+sub-items, todos as children, etc.).
 
 **Code block languages:** Use Notion's exact names. Common mappings:
 `dockerfile`→`docker`, `sh`→`shell`, `yml`→`yaml`, `tf`→`hcl`.

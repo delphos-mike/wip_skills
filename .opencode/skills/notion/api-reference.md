@@ -55,7 +55,7 @@ GET /v1/blocks/{block_id}/children?page_size=100&start_cursor={cursor}
 # Get comments for a block (or page)
 GET /v1/comments?block_id={block_id}
 
-# Create a comment
+# Create a page-level comment
 POST /v1/comments
 {
   "parent": { "page_id": "{page_id}" },
@@ -67,10 +67,21 @@ POST /v1/comments
   ]
 }
 
-# Reply to a discussion
+# Create a block-level comment (attaches to specific block)
 POST /v1/comments
 {
-  "parent": { "page_id": "{page_id}" },
+  "parent": { "block_id": "{block_id}" },
+  "rich_text": [
+    {
+      "type": "text",
+      "text": { "content": "Comment on this block" }
+    }
+  ]
+}
+
+# Reply to a discussion (ONLY discussion_id, NO parent)
+POST /v1/comments
+{
   "discussion_id": "{discussion_id}",
   "rich_text": [
     {
@@ -80,6 +91,10 @@ POST /v1/comments
   ]
 }
 ```
+
+**Important:** `parent.page_id`, `parent.block_id`, and `discussion_id` are
+**mutually exclusive** — only one can be specified per request. Sending
+multiple will result in a validation error.
 
 ### Users
 
@@ -96,7 +111,8 @@ GET /v1/users/me
 
 ## Comment Structure
 
-Comments in Notion are organized into discussions:
+Comments in Notion are organized into discussions. A comment's parent can be
+either a page or a block:
 
 ```json
 {
@@ -124,6 +140,39 @@ Comments in Notion are organized into discussions:
   ]
 }
 ```
+
+Block-level comments have `"type": "block_id"` in their parent:
+
+```json
+{
+  "parent": {
+    "type": "block_id",
+    "block_id": "block-id"
+  }
+}
+```
+
+## Rich Text with Links
+
+Links in rich text use the `link` field inside `text`:
+
+```json
+{
+  "type": "text",
+  "text": {
+    "content": "Click here",
+    "link": { "url": "https://example.com" }
+  },
+  "annotations": {
+    "bold": false,
+    "italic": false,
+    "code": false
+  }
+}
+```
+
+Links can be combined with annotations (bold, italic, code). The
+`markdown_to_blocks()` function automatically converts `[text](url)` syntax.
 
 ## Block Types
 

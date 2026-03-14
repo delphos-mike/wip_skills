@@ -426,39 +426,71 @@ def get_all_blocks(block_id: str, api_key: str) -> List[Dict[str, Any]]:
 # Markdown Conversion Functions
 
 
-def create_rich_text(text: str) -> List[Dict]:
-    """Create rich_text array from text with inline markdown formatting.
-
-    Supports:
-    - **bold**
-    - *italic*
-    - `code`
+def _make_rich_text_item(
+    content: str,
+    annotations: Optional[Dict[str, bool]] = None,
+    url: Optional[str] = None,
+) -> Dict:
+    """Build a single Notion rich_text item.
 
     Args:
-        text: Plain text with inline markdown
+        content: Text content
+        annotations: Optional formatting (bold, italic, code, etc.)
+        url: Optional link URL
 
     Returns:
-        list: Notion rich_text array
+        dict: Notion rich_text item
+    """
+    text_obj: Dict[str, Any] = {"content": content}
+    if url:
+        text_obj["link"] = {"url": url}
+
+    item: Dict[str, Any] = {"type": "text", "text": text_obj}
+    if annotations:
+        item["annotations"] = annotations
+    return item
+
+
+def _parse_inline_formatting(text: str, url: Optional[str] = None) -> List[Dict]:
+    """Parse inline markdown formatting (**bold**, *italic*, `code`).
+
+    This handles the inner formatting within a text segment. If url is
+    provided, all generated rich_text items will include the link.
+
+    Args:
+        text: Text with possible inline formatting
+        url: Optional link URL to attach to all items
+
+    Returns:
+        list: Notion rich_text items
     """
     if not text:
-        return [{"type": "text", "text": {"content": ""}}]
+        return [_make_rich_text_item("", url=url)]
 
     result = []
     i = 0
 
     while i < len(text):
+        # Check for ***bold italic*** or ___bold italic___
+        if text[i : i + 3] == "***" or text[i : i + 3] == "___":
+            marker = text[i : i + 3]
+            end = text.find(marker, i + 3)
+            if end != -1:
+                content = text[i + 3 : end]
+                result.append(
+                    _make_rich_text_item(
+                        content, {"bold": True, "italic": True}, url=url
+                    )
+                )
+                i = end + 3
+                continue
+
         # Check for **bold**
         if text[i : i + 2] == "**":
             end = text.find("**", i + 2)
             if end != -1:
                 content = text[i + 2 : end]
-                result.append(
-                    {
-                        "type": "text",
-                        "text": {"content": content},
-                        "annotations": {"bold": True},
-                    }
-                )
+                result.append(_make_rich_text_item(content, {"bold": True}, url=url))
                 i = end + 2
                 continue
 
@@ -467,13 +499,7 @@ def create_rich_text(text: str) -> List[Dict]:
             end = text.find("`", i + 1)
             if end != -1:
                 content = text[i + 1 : end]
-                result.append(
-                    {
-                        "type": "text",
-                        "text": {"content": content},
-                        "annotations": {"code": True},
-                    }
-                )
+                result.append(_make_rich_text_item(content, {"code": True}, url=url))
                 i = end + 1
                 continue
 
@@ -482,19 +508,15 @@ def create_rich_text(text: str) -> List[Dict]:
             end = text.find("*", i + 1)
             if end != -1 and text[end - 1 : end + 1] != "**":
                 content = text[i + 1 : end]
-                result.append(
-                    {
-                        "type": "text",
-                        "text": {"content": content},
-                        "annotations": {"italic": True},
-                    }
-                )
+                result.append(_make_rich_text_item(content, {"italic": True}, url=url))
                 i = end + 1
                 continue
 
         # Regular text - collect until next special char
         start = i
         while i < len(text):
+            if text[i : i + 3] in ("***", "___"):
+                break
             if text[i : i + 2] == "**":
                 break
             if text[i] == "`":
@@ -504,9 +526,58 @@ def create_rich_text(text: str) -> List[Dict]:
             i += 1
 
         if i > start:
-            result.append({"type": "text", "text": {"content": text[start:i]}})
+            result.append(_make_rich_text_item(text[start:i], url=url))
 
-    return result if result else [{"type": "text", "text": {"content": text}}]
+    return result if result else [_make_rich_text_item(text, url=url)]
+
+
+def create_rich_text(text: str) -> List[Dict]:
+    """Create rich_text array from text with inline markdown formatting.
+
+    Supports:
+    - **bold**
+    - *italic*
+    - ***bold italic***
+    - `code`
+    - [link text](url)
+    - [**bold link**](url) (formatting inside links)
+
+    Args:
+        text: Plain text with inline markdown
+
+    Returns:
+        list: Notion rich_text array
+    """
+    if not text:
+        return [_make_rich_text_item("")]
+
+    # First pass: split text into segments that are either markdown links
+    # or plain text (which may contain inline formatting).
+    # Pattern matches [text](url) but not ![text](url) (images)
+    link_pattern = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)]+)\)")
+
+    result: List[Dict] = []
+    last_end = 0
+
+    for match in link_pattern.finditer(text):
+        # Process any text before this link
+        before = text[last_end : match.start()]
+        if before:
+            result.extend(_parse_inline_formatting(before))
+
+        # Process the link — inner text may have formatting
+        link_text = match.group(1)
+        link_url = match.group(2)
+        result.extend(_parse_inline_formatting(link_text, url=link_url))
+
+        last_end = match.end()
+
+    # Process any remaining text after the last link
+    remaining = text[last_end:]
+    if remaining:
+        result.extend(_parse_inline_formatting(remaining))
+
+    return result if result else [_make_rich_text_item(text)]
 
 
 def parse_table_row(line: str) -> List[str]:
@@ -567,20 +638,153 @@ def create_table_block(rows: List[List[str]]) -> Optional[Dict[str, Any]]:
     }
 
 
+def _get_indent_level(line: str) -> int:
+    """Get the indentation level of a line (number of leading spaces / 2, or tabs)."""
+    stripped = line.lstrip()
+    indent = len(line) - len(stripped)
+    # Tabs count as one level, spaces count as level per 2 (common indent)
+    if "\t" in line[:indent]:
+        return line[:indent].count("\t")
+    return indent // 2
+
+
+def _parse_list_item(line: str) -> Optional[Dict[str, Any]]:
+    """Parse a single list line into a Notion block (without children).
+
+    Returns None if the line is not a list item.
+    """
+    stripped = line.strip()
+
+    # Todo items (checked)
+    if stripped.startswith("- [x] ") or stripped.startswith("- [X] "):
+        return {
+            "object": "block",
+            "type": "to_do",
+            "to_do": {"rich_text": create_rich_text(stripped[6:]), "checked": True},
+        }
+
+    # Todo items (unchecked)
+    if stripped.startswith("- [ ] "):
+        return {
+            "object": "block",
+            "type": "to_do",
+            "to_do": {"rich_text": create_rich_text(stripped[6:]), "checked": False},
+        }
+
+    # Bulleted list
+    if stripped.startswith("- ") or stripped.startswith("* "):
+        return {
+            "object": "block",
+            "type": "bulleted_list_item",
+            "bulleted_list_item": {"rich_text": create_rich_text(stripped[2:])},
+        }
+
+    # Numbered list
+    m = re.match(r"^\d+\.\s+(.*)", stripped)
+    if m:
+        return {
+            "object": "block",
+            "type": "numbered_list_item",
+            "numbered_list_item": {"rich_text": create_rich_text(m.group(1))},
+        }
+
+    return None
+
+
+def _is_list_line(line: str) -> bool:
+    """Check if a line is any kind of list item (bullet, numbered, todo)."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.startswith("- ") or stripped.startswith("* "):
+        return True
+    if re.match(r"^\d+\.\s", stripped):
+        return True
+    return False
+
+
+def _collect_nested_list(
+    lines: List[str], start: int, base_indent: int
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Collect a run of list items starting at `start`, building nested children.
+
+    Processes list items at `base_indent` level and any indented sub-items
+    as children of the preceding item.
+
+    Args:
+        lines: All document lines
+        start: Starting line index
+        base_indent: Indentation level of the parent context
+
+    Returns:
+        (blocks, next_index): list of Notion blocks, and the next line to process
+    """
+    blocks: List[Dict[str, Any]] = []
+    i = start
+
+    while i < len(lines):
+        line = lines[i]
+
+        # Stop on empty lines or non-list content at/below base indent
+        if not line.strip():
+            # Blank line might separate list groups — peek ahead
+            # If the next non-blank line is still a list item at the same
+            # or deeper indent, continue. Otherwise, break.
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j < len(lines) and _is_list_line(lines[j]):
+                indent = _get_indent_level(lines[j])
+                if indent >= base_indent:
+                    i = j
+                    continue
+            break
+
+        indent = _get_indent_level(line)
+
+        # If this line is less indented than our base, it belongs to parent
+        if indent < base_indent:
+            break
+
+        # If this line is more indented, it's a child of the last block
+        if indent > base_indent and blocks:
+            children, i = _collect_nested_list(lines, i, indent)
+            if children:
+                last_block = blocks[-1]
+                block_type = last_block["type"]
+                if "children" not in last_block[block_type]:
+                    last_block[block_type]["children"] = []
+                last_block[block_type]["children"].extend(children)
+            continue
+
+        # Parse list item at our level
+        item = _parse_list_item(line)
+        if item:
+            blocks.append(item)
+            i += 1
+        else:
+            # Not a list item at this level — stop
+            break
+
+    return blocks, i
+
+
 def markdown_to_blocks(markdown: str) -> List[Dict[str, Any]]:
     """Convert markdown to Notion block format.
 
     Supported:
     - # Heading 1, ## Heading 2, ### Heading 3
     - Paragraphs
-    - - Bullet lists
-    - 1. Numbered lists
-    - - [ ] Todo items
+    - - Bullet lists (with nesting via indentation)
+    - 1. Numbered lists (with nesting via indentation)
+    - - [ ] Todo items (with nesting via indentation)
     - - [x] Completed todos
+    - [link text](url) — inline links
     - ```code blocks```
     - > Quotes
     - --- Dividers
     - | Tables |
+    - ![alt](url) — Images
 
     Args:
         markdown: Markdown text
@@ -588,8 +792,6 @@ def markdown_to_blocks(markdown: str) -> List[Dict[str, Any]]:
     Returns:
         list: Notion blocks
     """
-    import re
-
     blocks = []
     lines = markdown.split("\n")
     i = 0
@@ -644,47 +846,12 @@ def markdown_to_blocks(markdown: str) -> List[Dict[str, Any]]:
                 }
             )
 
-        # Todo items
-        elif line.strip().startswith("- [x] ") or line.strip().startswith("- [X] "):
-            text = line.strip()[6:]
-            blocks.append(
-                {
-                    "object": "block",
-                    "type": "to_do",
-                    "to_do": {"rich_text": create_rich_text(text), "checked": True},
-                }
-            )
-        elif line.strip().startswith("- [ ] "):
-            text = line.strip()[6:]
-            blocks.append(
-                {
-                    "object": "block",
-                    "type": "to_do",
-                    "to_do": {"rich_text": create_rich_text(text), "checked": False},
-                }
-            )
-
-        # Bulleted list
-        elif line.strip().startswith("- ") or line.strip().startswith("* "):
-            text = line.strip()[2:]
-            blocks.append(
-                {
-                    "object": "block",
-                    "type": "bulleted_list_item",
-                    "bulleted_list_item": {"rich_text": create_rich_text(text)},
-                }
-            )
-
-        # Numbered list
-        elif re.match(r"^\s*\d+\.\s", line):
-            text = re.sub(r"^\s*\d+\.\s", "", line)
-            blocks.append(
-                {
-                    "object": "block",
-                    "type": "numbered_list_item",
-                    "numbered_list_item": {"rich_text": create_rich_text(text)},
-                }
-            )
+        # List items (bullet, numbered, todo) — handled together for nesting
+        elif _is_list_line(line):
+            indent = _get_indent_level(line)
+            nested_blocks, i = _collect_nested_list(lines, i, indent)
+            blocks.extend(nested_blocks)
+            continue  # _collect_nested_list already advanced i
 
         # Code block
         elif line.strip().startswith("```"):
