@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """Clear all content from a Notion page.
 
 Usage:
@@ -18,15 +22,13 @@ Warning: This will delete ALL blocks from the page!
 import argparse
 import json
 import sys
-from typing import Dict, List
 
 from notion_utils import (
+    concurrent_deletes,
+    get_all_blocks,
+    is_interactive,
     load_api_key,
     parse_notion_id,
-    api_call,
-    get_all_blocks,
-    concurrent_deletes,
-    is_interactive,
 )
 
 
@@ -58,9 +60,7 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument("page_id", help="Page ID or URL to clear")
-    parser.add_argument(
-        "--yes", "-y", action="store_true", help="Skip confirmation prompt"
-    )
+    parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
     args = parser.parse_args()
 

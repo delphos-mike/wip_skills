@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """✅ SAFE: Edit Notion page preserving comments.
 
 Simple wrapper for the safe edit workflow that preserves comments.
@@ -20,6 +24,7 @@ Examples:
     # Direct sync (if you already edited the JSON)
     edit_page.py <page_id> edited_page.json
 """
+
 import argparse
 import json
 import os
@@ -33,21 +38,21 @@ from notion_utils import load_api_key, parse_notion_id
 
 def main():
     parser = argparse.ArgumentParser(
-        description='✅ SAFE: Edit Notion page preserving comments',
+        description="✅ SAFE: Edit Notion page preserving comments",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
-    parser.add_argument('page_id', help='Page ID or URL')
-    parser.add_argument('json_file', nargs='?', help='Pre-edited JSON file (optional)')
-    parser.add_argument('--delete-removed', action='store_true',
-                       help='Delete blocks not in edited content (loses their comments!)')
-    parser.add_argument('--force', '-f', action='store_true',
-                       help='Skip confidence checks in sync')
+    parser.add_argument("page_id", help="Page ID or URL")
+    parser.add_argument("json_file", nargs="?", help="Pre-edited JSON file (optional)")
+    parser.add_argument(
+        "--delete-removed", action="store_true", help="Delete blocks not in edited content (loses their comments!)"
+    )
+    parser.add_argument("--force", "-f", action="store_true", help="Skip confidence checks in sync")
 
     args = parser.parse_args()
 
     try:
-        api_key = load_api_key()
+        load_api_key()  # validate key is available
         page_id = parse_notion_id(args.page_id)
 
         script_dir = Path(__file__).parent
@@ -60,47 +65,43 @@ def main():
                 sys.exit(1)
 
             print(f"Syncing from {json_path}...", file=sys.stderr)
-            cmd = [str(script_dir / 'sync_page.py'), page_id, str(json_path)]
+            cmd = [str(script_dir / "sync_page.py"), page_id, str(json_path)]
             if args.delete_removed:
-                cmd.append('--delete-removed')
+                cmd.append("--delete-removed")
             if args.force:
-                cmd.append('--force')
+                cmd.append("--force")
 
             result = subprocess.run(cmd)
             sys.exit(result.returncode)
 
         else:
             # Interactive workflow
-            print("="*70, file=sys.stderr)
+            print("=" * 70, file=sys.stderr)
             print("✅ SAFE EDIT WORKFLOW (Preserves Comments)", file=sys.stderr)
-            print("="*70, file=sys.stderr)
+            print("=" * 70, file=sys.stderr)
 
             # Step 1: Download
             print("\n[1/3] Downloading page content...", file=sys.stderr)
             temp_file = tempfile.NamedTemporaryFile(
-                mode='w',
-                suffix='.json',
-                prefix=f'notion_page_{page_id[:8]}_',
-                delete=False,
-                dir='/tmp'
+                mode="w", suffix=".json", prefix=f"notion_page_{page_id[:8]}_", delete=False, dir="/tmp"
             )
             temp_path = temp_file.name
             temp_file.close()
 
-            cmd = [str(script_dir / 'read_page.py'), page_id, '--output', 'json']
+            cmd = [str(script_dir / "read_page.py"), page_id, "--output", "json"]
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
                 print(f"Error downloading page: {result.stderr}", file=sys.stderr)
                 sys.exit(1)
 
-            with open(temp_path, 'w') as f:
+            with open(temp_path, "w") as f:
                 f.write(result.stdout)
 
             print(f"✓ Downloaded to: {temp_path}", file=sys.stderr)
 
             # Step 2: Edit
             print("\n[2/3] Opening editor...", file=sys.stderr)
-            editor = os.environ.get('EDITOR', 'vim')
+            editor = os.environ.get("EDITOR", "vim")
             print(f"Using editor: {editor}", file=sys.stderr)
             print("Edit the JSON file, then save and quit to continue.", file=sys.stderr)
             print("(Or quit without saving to cancel)", file=sys.stderr)
@@ -128,11 +129,11 @@ def main():
 
             # Step 3: Sync
             print("\n[3/3] Syncing changes...", file=sys.stderr)
-            cmd = [str(script_dir / 'sync_page.py'), page_id, temp_path]
+            cmd = [str(script_dir / "sync_page.py"), page_id, temp_path]
             if args.delete_removed:
-                cmd.append('--delete-removed')
+                cmd.append("--delete-removed")
             if args.force:
-                cmd.append('--force')
+                cmd.append("--force")
 
             result = subprocess.run(cmd)
 
@@ -150,9 +151,10 @@ def main():
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

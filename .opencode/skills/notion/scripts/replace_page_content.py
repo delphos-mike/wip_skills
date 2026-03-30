@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """⚠️  WARNING: DELETES ALL BLOCKS AND THEIR COMMENTS!
 
 Replace entire page content with new content.
@@ -31,16 +35,15 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Any
 
 from notion_utils import (
-    load_api_key,
-    parse_notion_id,
     api_call,
-    get_all_blocks,
-    markdown_to_blocks,
-    create_rich_text,
     concurrent_deletes,
+    get_all_blocks,
+    is_interactive,
+    load_api_key,
+    markdown_to_blocks,
+    parse_notion_id,
 )
 
 
@@ -49,7 +52,7 @@ def delete_block(block_id: str, api_key: str):
     api_call(f"blocks/{block_id}", api_key, "DELETE")
 
 
-def replace_content(page_id: str, new_blocks: List[Dict], api_key: str):
+def replace_content(page_id: str, new_blocks: list[dict], api_key: str):
     """Replace entire page content."""
 
     # Get existing blocks
@@ -60,7 +63,7 @@ def replace_content(page_id: str, new_blocks: List[Dict], api_key: str):
     if existing:
         print(f"Deleting {len(existing)} existing blocks...", file=sys.stderr)
         block_ids = [b["id"] for b in existing]
-        deleted, failed = concurrent_deletes(block_ids, api_key)
+        _deleted, failed = concurrent_deletes(block_ids, api_key)
         if failed:
             print(f"  Warning: {failed} blocks failed to delete", file=sys.stderr)
 
@@ -91,9 +94,7 @@ def main():
     group.add_argument("--markdown", help="Markdown content")
     group.add_argument("--file", help="Markdown file")
 
-    parser.add_argument(
-        "--yes", "-y", action="store_true", help="Skip confirmation prompt"
-    )
+    parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
     args = parser.parse_args()
 
@@ -101,7 +102,7 @@ def main():
         api_key = load_api_key()
         page_id = parse_notion_id(args.page_id)
 
-        blocks: List[Dict] = []
+        blocks: list[dict] = []
         if args.markdown:
             blocks = markdown_to_blocks(args.markdown)
         elif args.file:
@@ -114,14 +115,18 @@ def main():
 
         # Safety confirmation
         if not args.yes:
+            if not is_interactive():
+                print(
+                    "Error: confirmation required. Use --yes to skip in non-interactive mode.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             print("\n" + "=" * 70, file=sys.stderr)
             print("⚠️  WARNING: DANGEROUS OPERATION", file=sys.stderr)
             print("=" * 70, file=sys.stderr)
             print("\nThis will DELETE ALL BLOCKS and their COMMENTS!", file=sys.stderr)
             print("\n💡 Safer alternative (preserves comments):", file=sys.stderr)
-            print(
-                "   read_page.py <page_id> --output json > page.json", file=sys.stderr
-            )
+            print("   read_page.py <page_id> --output json > page.json", file=sys.stderr)
             print("   # ... edit page.json ...", file=sys.stderr)
             print("   sync_page.py <page_id> page.json", file=sys.stderr)
             print("\n" + "=" * 70, file=sys.stderr)

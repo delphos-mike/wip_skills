@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """Create a comment on a Notion page or block.
 
 Creates page-level or block-level comments. To reply to an existing
@@ -24,7 +28,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from notion_utils import api_call, create_rich_text, load_api_key, parse_notion_id
 
@@ -32,10 +36,10 @@ from notion_utils import api_call, create_rich_text, load_api_key, parse_notion_
 def create_comment(
     api_key: str,
     text: str,
-    page_id: Optional[str] = None,
-    block_id: Optional[str] = None,
-    discussion_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    page_id: str | None = None,
+    block_id: str | None = None,
+    discussion_id: str | None = None,
+) -> dict[str, Any]:
     """Create a comment on a Notion page, block, or discussion thread.
 
     Exactly one of page_id, block_id, or discussion_id must be provided.
@@ -57,13 +61,11 @@ def create_comment(
     """
     targets = sum(1 for t in (page_id, block_id, discussion_id) if t)
     if targets != 1:
-        raise ValueError(
-            "Exactly one of page_id, block_id, or discussion_id must be provided"
-        )
+        raise ValueError("Exactly one of page_id, block_id, or discussion_id must be provided")
 
     rich_text = create_rich_text(text)
 
-    data: Dict[str, Any] = {"rich_text": rich_text}
+    data: dict[str, Any] = {"rich_text": rich_text}
 
     if page_id:
         data["parent"] = {"page_id": page_id}
@@ -75,7 +77,7 @@ def create_comment(
     return api_call("comments", api_key, method="POST", data=data)
 
 
-def get_page_comments(api_key: str, block_id: str) -> List[Dict[str, Any]]:
+def get_page_comments(api_key: str, block_id: str) -> list[dict[str, Any]]:
     """Get all comments for a block or page.
 
     Args:
@@ -112,9 +114,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument(
-        "page", nargs="?", help="Notion page URL or ID (for page-level comments)"
-    )
+    parser.add_argument("page", nargs="?", help="Notion page URL or ID (for page-level comments)")
     parser.add_argument("text", nargs="?", help="Comment text")
     parser.add_argument("--file", "-f", help="Read comment text from file")
     parser.add_argument(
@@ -131,8 +131,13 @@ def main():
         return
 
     # Get comment text
+    # When --block is used, the first positional arg is the text (not a page ID)
     if args.file:
         text = Path(args.file).read_text().strip()
+    elif args.block and args.page and not args.text:
+        # argparse captured the comment text as 'page' since it comes first
+        text = args.page
+        args.page = None
     elif args.text:
         text = args.text
     else:
@@ -169,6 +174,9 @@ def main():
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 

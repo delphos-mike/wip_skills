@@ -2,12 +2,15 @@
 """Shared utilities for Notion API scripts.
 
 This module provides common functionality for all Notion scripts:
-- Automatic virtual environment setup (zero manual bootstrap)
-- Secure API key loading (never exposed in process arguments)
+- Secure API key loading via 1Password CLI
 - Standardized API calls with rate limiting and retry logic
 - Notion ID parsing and validation
 - Concurrent API helpers
 - Error handling
+
+Requirements: scripts are run via `uv run`, which resolves dependencies
+from PEP 723 inline metadata in each entry-point script. This module is
+imported as a sibling — no separate dependency declaration needed.
 """
 
 import json
@@ -17,148 +20,22 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
-
-# ── Auto-bootstrap: ensure we're running in the skill's venv ────────
-#
-# When an agent runs `python3 read_page.py`, the system python has no
-# `requests` installed. This block detects that, creates the skill's
-# venv (using uv or stdlib venv), installs deps, and re-execs the
-# original command under the venv's python. The re-exec only happens
-# once — the second invocation lands inside the venv and skips this.
-
-_SKILL_DIR = Path(__file__).parent.parent
-_VENV_DIR = _SKILL_DIR / ".venv"
-_VENV_PYTHON = _VENV_DIR / "bin" / "python3"
-_REQUIREMENTS = _SKILL_DIR / "requirements.txt"
-
-
-def _is_inside_venv() -> bool:
-    """Check if we're running inside the skill's virtual environment."""
-    # sys.prefix changes when a venv is active
-    return sys.prefix == str(_VENV_DIR) or str(_VENV_DIR) in sys.prefix
-
-
-def _bootstrap_and_reexec() -> None:
-    """Create the venv, install deps, and re-exec the current script."""
-    print("notion-skill: first run — setting up Python environment...", file=sys.stderr)
-
-    if not _VENV_DIR.exists():
-        # Prefer uv for speed (creates venv + installs in one shot)
-        uv = _find_uv()
-        if uv:
-            print(f"notion-skill: creating venv with uv...", file=sys.stderr)
-            subprocess.check_call(
-                [uv, "venv", str(_VENV_DIR), "--quiet"],
-                stdout=sys.stderr,
-            )
-            if _REQUIREMENTS.exists():
-                subprocess.check_call(
-                    [
-                        uv,
-                        "pip",
-                        "install",
-                        "--quiet",
-                        "-r",
-                        str(_REQUIREMENTS),
-                        "--python",
-                        str(_VENV_PYTHON),
-                    ],
-                    stdout=sys.stderr,
-                )
-            else:
-                subprocess.check_call(
-                    [
-                        uv,
-                        "pip",
-                        "install",
-                        "--quiet",
-                        "requests",
-                        "--python",
-                        str(_VENV_PYTHON),
-                    ],
-                    stdout=sys.stderr,
-                )
-        else:
-            # Fallback to stdlib venv + pip
-            print(
-                f"notion-skill: creating venv with python3 -m venv...", file=sys.stderr
-            )
-            subprocess.check_call(
-                [sys.executable, "-m", "venv", str(_VENV_DIR)],
-                stdout=sys.stderr,
-            )
-            pip = str(_VENV_DIR / "bin" / "pip")
-            if _REQUIREMENTS.exists():
-                subprocess.check_call(
-                    [pip, "install", "--quiet", "-r", str(_REQUIREMENTS)],
-                    stdout=sys.stderr,
-                )
-            else:
-                subprocess.check_call(
-                    [pip, "install", "--quiet", "requests"],
-                    stdout=sys.stderr,
-                )
-
-    print("notion-skill: environment ready, restarting...", file=sys.stderr)
-
-    # Re-exec the original command under the venv's python
-    os.execv(str(_VENV_PYTHON), [str(_VENV_PYTHON)] + sys.argv)
-
-
-def _find_uv() -> str | None:
-    """Find uv binary if available."""
-    # Check common locations
-    for candidate in [
-        os.path.expanduser("~/.local/bin/uv"),
-        os.path.expanduser("~/.cargo/bin/uv"),
-        "/usr/local/bin/uv",
-    ]:
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-
-    # Check PATH
-    from shutil import which
-
-    return which("uv")
-
-
-# Run the bootstrap check before importing anything that needs pip packages
-if not _is_inside_venv() and _VENV_PYTHON.exists():
-    # Venv exists but we're not in it — re-exec directly
-    os.execv(str(_VENV_PYTHON), [str(_VENV_PYTHON)] + sys.argv)
-elif not _is_inside_venv():
-    # No venv at all — bootstrap then re-exec
-    try:
-        _bootstrap_and_reexec()
-    except (subprocess.CalledProcessError, OSError) as e:
-        print(f"notion-skill: auto-bootstrap failed: {e}", file=sys.stderr)
-        print(
-            f"notion-skill: run manually: cd {_SKILL_DIR} && ./scripts/bootstrap",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-# ── If we get here, we're inside the venv. Safe to import pip packages. ──
-
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
-try:
-    import requests
-except ImportError:
-    # This should never happen after bootstrap, but just in case
-    print("Error: 'requests' library not found even after bootstrap.", file=sys.stderr)
-    print(f"  Try: cd {_SKILL_DIR} && ./scripts/bootstrap", file=sys.stderr)
-    sys.exit(1)
+import requests
+
+_SKILL_DIR = Path(__file__).parent.parent
 
 
 # Rate limiting: Notion API allows 3 requests per second
 _RATE_LIMIT_CALLS = 3
 _RATE_LIMIT_PERIOD = 1.0  # seconds
-_last_call_times: List[float] = []
+_last_call_times: list[float] = []
 _rate_limit_lock = threading.Lock()
 
 
@@ -178,9 +55,7 @@ def rate_limit(func: Callable) -> Callable:
             current_time = time.time()
 
             # Remove calls older than the rate limit period
-            _last_call_times = [
-                t for t in _last_call_times if current_time - t < _RATE_LIMIT_PERIOD
-            ]
+            _last_call_times = [t for t in _last_call_times if current_time - t < _RATE_LIMIT_PERIOD]
 
             # If at limit, compute wait time but don't sleep yet
             if len(_last_call_times) >= _RATE_LIMIT_CALLS:
@@ -199,23 +74,123 @@ def rate_limit(func: Callable) -> Callable:
     return wrapper
 
 
+_SECRETS_DIR = _SKILL_DIR / ".secrets"
+_CACHED_KEY_FILE = _SECRETS_DIR / "notion_api_key"
+
+# 1Password vault path for the Notion API key.
+# Override with NOTION_OP_REF env var if your vault layout differs.
+_OP_DEFAULT_REF = "op://it-ops-helpers/NOTION_SKILL_INTEGRATION/credential"
+
+
+def _read_cached_key() -> str | None:
+    """Read the cached API key from .secrets/notion_api_key."""
+    if _CACHED_KEY_FILE.is_file():
+        key = _CACHED_KEY_FILE.read_text().strip()
+        if key:
+            return key
+    return None
+
+
+def _cache_key(api_key: str) -> None:
+    """Cache API key to .secrets/notion_api_key with restrictive permissions."""
+    try:
+        _SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+        os.chmod(str(_SECRETS_DIR), 0o700)
+        fd = os.open(str(_CACHED_KEY_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(api_key + "\n")
+    except OSError as e:
+        print(
+            f"notion-skill: Warning: Could not cache API key: {e}",
+            file=sys.stderr,
+        )
+
+
+def _require_op() -> str:
+    """Return the path to the 1Password CLI binary, or raise."""
+    from shutil import which
+
+    op_bin = which("op")
+    if not op_bin:
+        raise RuntimeError(
+            "1Password CLI (`op`) is required but not found in PATH.\n"
+            "Install it: https://developer.1password.com/docs/cli/get-started/\n"
+            "Then sign in: eval $(op signin)"
+        )
+    return op_bin
+
+
+def _fetch_key_from_op() -> str:
+    """Fetch the Notion API key from 1Password CLI.
+
+    Raises:
+        RuntimeError: If op CLI is missing or the lookup fails.
+    """
+    op_ref = os.environ.get("NOTION_OP_REF", _OP_DEFAULT_REF)
+    op_bin = _require_op()
+
+    try:
+        result = subprocess.run(
+            [op_bin, "read", op_ref],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            key = result.stdout.strip()
+            if key:
+                return key
+
+        stderr = result.stderr.strip() if result.stderr else "unknown error"
+        raise RuntimeError(
+            f"1Password lookup failed: {stderr}\n"
+            f"  Reference: {op_ref}\n"
+            "  Make sure you are signed in: eval $(op signin)"
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("1Password CLI timed out after 30s. Is the app responsive?") from e
+    except OSError as e:
+        raise RuntimeError(f"Failed to run 1Password CLI: {e}") from e
+
+
 def load_api_key() -> str:
-    """Load Notion API key from NOTION_API_KEY environment variable.
+    """Load Notion API key with cascading resolution.
+
+    Resolution order:
+      1. NOTION_API_KEY environment variable (fastest, covers chezmoi/dotfile users)
+      2. Cached key in .secrets/notion_api_key (persists across sessions)
+      3. 1Password CLI (`op read`) — fetched and cached for future use
+
+    The 1Password CLI is a hard requirement. If the key is not in the
+    environment or cache, `op` must be installed and authenticated.
+
+    The cached key file is stored in the skill directory under .secrets/ with
+    0600 permissions. Override the 1Password reference with NOTION_OP_REF env var.
 
     Returns:
         str: Notion API key
 
     Raises:
-        ValueError: If NOTION_API_KEY is not set
+        RuntimeError: If op CLI is missing or lookup fails
     """
+    # 1. Environment variable
     api_key = os.environ.get("NOTION_API_KEY")
     if api_key:
         return api_key
 
-    raise ValueError(
-        "NOTION_API_KEY environment variable is not set. "
-        "Export it or add it to your shell profile."
+    # 2. Cached key file
+    api_key = _read_cached_key()
+    if api_key:
+        return api_key
+
+    # 3. 1Password CLI (required)
+    api_key = _fetch_key_from_op()
+    _cache_key(api_key)
+    print(
+        f"notion-skill: API key fetched from 1Password and cached to {_CACHED_KEY_FILE}",
+        file=sys.stderr,
     )
+    return api_key
 
 
 def parse_notion_id(id_input: str) -> str:
@@ -261,10 +236,10 @@ def api_call(
     endpoint: str,
     api_key: str,
     method: str = "GET",
-    data: Optional[Dict] = None,
+    data: dict | None = None,
     max_retries: int = 3,
     retry_delay: float = 1.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Make a Notion API call with rate limiting and retry logic.
 
     Args:
@@ -307,22 +282,16 @@ def api_call(
             try:
                 result = response.json()
             except json.JSONDecodeError as e:
-                raise ValueError(
-                    f"Invalid JSON response from API: {e}\nResponse text: {response.text[:200]}"
-                )
+                raise ValueError(f"Invalid JSON response from API: {e}\nResponse text: {response.text[:200]}") from e
 
             # Check for API errors
             if response.status_code == 429:  # Rate limited
-                retry_after = int(
-                    response.headers.get("Retry-After", retry_delay * (2**attempt))
-                )
+                retry_after = float(response.headers.get("Retry-After", retry_delay * (2**attempt)))
                 if attempt < max_retries - 1:
                     time.sleep(retry_after)
                     continue
                 else:
-                    raise requests.RequestException(
-                        f"Rate limited: {result.get('message', 'Too many requests')}"
-                    )
+                    raise requests.RequestException(f"Rate limited: {result.get('message', 'Too many requests')}")
 
             if response.status_code >= 400:
                 error_msg = result.get("message", f"HTTP {response.status_code}")
@@ -351,7 +320,7 @@ def api_call(
     raise requests.RequestException(f"Failed after {max_retries} attempts")
 
 
-def extract_rich_text(rich_text: List[Dict]) -> str:
+def extract_rich_text(rich_text: list[dict]) -> str:
     """Extract plain text from Notion rich_text array.
 
     Args:
@@ -365,7 +334,7 @@ def extract_rich_text(rich_text: List[Dict]) -> str:
     return "".join([rt.get("plain_text", "") for rt in rich_text])
 
 
-def get_all_blocks(block_id: str, api_key: str) -> List[Dict[str, Any]]:
+def get_all_blocks(block_id: str, api_key: str) -> list[dict[str, Any]]:
     """Get all blocks recursively with pagination support.
 
     Fetches children concurrently for blocks that have them.
@@ -398,23 +367,26 @@ def get_all_blocks(block_id: str, api_key: str) -> List[Dict[str, Any]]:
     # Fetch children concurrently for blocks that have them
     blocks_with_children = [b for b in blocks if b.get("has_children")]
     if blocks_with_children:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         def fetch_children(block):
             children = get_all_blocks(block["id"], api_key)
             return block["id"], children
 
         with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {
-                executor.submit(fetch_children, b): b for b in blocks_with_children
-            }
+            futures = {executor.submit(fetch_children, b): b for b in blocks_with_children}
             children_map = {}
             for future in as_completed(futures):
                 try:
                     bid, children = future.result()
                     children_map[bid] = children
-                except Exception:
-                    pass  # Skip failed child fetches
+                except Exception as e:
+                    failed_block = futures[future]
+                    print(
+                        f"  Warning: Failed to fetch children of block "
+                        f"{failed_block['id']} "
+                        f"(type={failed_block.get('type', 'unknown')}): {e}",
+                        file=sys.stderr,
+                    )
 
             for block in blocks:
                 if block["id"] in children_map:
@@ -428,9 +400,9 @@ def get_all_blocks(block_id: str, api_key: str) -> List[Dict[str, Any]]:
 
 def _make_rich_text_item(
     content: str,
-    annotations: Optional[Dict[str, bool]] = None,
-    url: Optional[str] = None,
-) -> Dict:
+    annotations: dict[str, bool] | None = None,
+    url: str | None = None,
+) -> dict:
     """Build a single Notion rich_text item.
 
     Args:
@@ -441,17 +413,17 @@ def _make_rich_text_item(
     Returns:
         dict: Notion rich_text item
     """
-    text_obj: Dict[str, Any] = {"content": content}
+    text_obj: dict[str, Any] = {"content": content}
     if url:
         text_obj["link"] = {"url": url}
 
-    item: Dict[str, Any] = {"type": "text", "text": text_obj}
+    item: dict[str, Any] = {"type": "text", "text": text_obj}
     if annotations:
         item["annotations"] = annotations
     return item
 
 
-def _parse_inline_formatting(text: str, url: Optional[str] = None) -> List[Dict]:
+def _parse_inline_formatting(text: str, url: str | None = None) -> list[dict]:
     """Parse inline markdown formatting (**bold**, *italic*, `code`).
 
     This handles the inner formatting within a text segment. If url is
@@ -477,11 +449,7 @@ def _parse_inline_formatting(text: str, url: Optional[str] = None) -> List[Dict]
             end = text.find(marker, i + 3)
             if end != -1:
                 content = text[i + 3 : end]
-                result.append(
-                    _make_rich_text_item(
-                        content, {"bold": True, "italic": True}, url=url
-                    )
-                )
+                result.append(_make_rich_text_item(content, {"bold": True, "italic": True}, url=url))
                 i = end + 3
                 continue
 
@@ -511,6 +479,10 @@ def _parse_inline_formatting(text: str, url: Optional[str] = None) -> List[Dict]
                 result.append(_make_rich_text_item(content, {"italic": True}, url=url))
                 i = end + 1
                 continue
+            # No closing * found — treat this * as literal text, advance past it
+            # to prevent infinite loop
+            i += 1
+            continue
 
         # Regular text - collect until next special char
         start = i
@@ -531,7 +503,7 @@ def _parse_inline_formatting(text: str, url: Optional[str] = None) -> List[Dict]
     return result if result else [_make_rich_text_item(text, url=url)]
 
 
-def create_rich_text(text: str) -> List[Dict]:
+def create_rich_text(text: str) -> list[dict]:
     """Create rich_text array from text with inline markdown formatting.
 
     Supports:
@@ -556,7 +528,7 @@ def create_rich_text(text: str) -> List[Dict]:
     # Pattern matches [text](url) but not ![text](url) (images)
     link_pattern = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)]+)\)")
 
-    result: List[Dict] = []
+    result: list[dict] = []
     last_end = 0
 
     for match in link_pattern.finditer(text):
@@ -580,7 +552,7 @@ def create_rich_text(text: str) -> List[Dict]:
     return result if result else [_make_rich_text_item(text)]
 
 
-def parse_table_row(line: str) -> List[str]:
+def parse_table_row(line: str) -> list[str]:
     """Parse a markdown table row into cells."""
     line = line.strip()
     if line.startswith("|"):
@@ -605,7 +577,7 @@ def is_table_row(line: str) -> bool:
     return line.startswith("|") and line.endswith("|") and line.count("|") >= 2
 
 
-def create_table_block(rows: List[List[str]]) -> Optional[Dict[str, Any]]:
+def create_table_block(rows: list[list[str]]) -> dict[str, Any] | None:
     """Create a Notion table block from parsed rows."""
     if not rows:
         return None
@@ -622,9 +594,7 @@ def create_table_block(rows: List[List[str]]) -> Optional[Dict[str, Any]]:
         for cell in row[:num_cols]:
             cells.append(create_rich_text(cell))
 
-        table_rows.append(
-            {"object": "block", "type": "table_row", "table_row": {"cells": cells}}
-        )
+        table_rows.append({"object": "block", "type": "table_row", "table_row": {"cells": cells}})
 
     return {
         "object": "block",
@@ -648,7 +618,7 @@ def _get_indent_level(line: str) -> int:
     return indent // 2
 
 
-def _parse_list_item(line: str) -> Optional[Dict[str, Any]]:
+def _parse_list_item(line: str) -> dict[str, Any] | None:
     """Parse a single list line into a Notion block (without children).
 
     Returns None if the line is not a list item.
@@ -703,9 +673,7 @@ def _is_list_line(line: str) -> bool:
     return False
 
 
-def _collect_nested_list(
-    lines: List[str], start: int, base_indent: int
-) -> Tuple[List[Dict[str, Any]], int]:
+def _collect_nested_list(lines: list[str], start: int, base_indent: int) -> tuple[list[dict[str, Any]], int]:
     """Collect a run of list items starting at `start`, building nested children.
 
     Processes list items at `base_indent` level and any indented sub-items
@@ -719,7 +687,7 @@ def _collect_nested_list(
     Returns:
         (blocks, next_index): list of Notion blocks, and the next line to process
     """
-    blocks: List[Dict[str, Any]] = []
+    blocks: list[dict[str, Any]] = []
     i = start
 
     while i < len(lines):
@@ -748,13 +716,18 @@ def _collect_nested_list(
 
         # If this line is more indented, it's a child of the last block
         if indent > base_indent and blocks:
-            children, i = _collect_nested_list(lines, i, indent)
+            children, new_i = _collect_nested_list(lines, i, indent)
             if children:
                 last_block = blocks[-1]
                 block_type = last_block["type"]
                 if "children" not in last_block[block_type]:
                     last_block[block_type]["children"] = []
                 last_block[block_type]["children"].extend(children)
+            # Guard against infinite loop: if no progress was made, skip line
+            if new_i <= i:
+                i += 1
+            else:
+                i = new_i
             continue
 
         # Parse list item at our level
@@ -769,7 +742,7 @@ def _collect_nested_list(
     return blocks, i
 
 
-def markdown_to_blocks(markdown: str) -> List[Dict[str, Any]]:
+def markdown_to_blocks(markdown: str) -> list[dict[str, Any]]:
     """Convert markdown to Notion block format.
 
     Supported:
@@ -807,9 +780,7 @@ def markdown_to_blocks(markdown: str) -> List[Dict[str, Any]]:
         # Table detection
         if is_table_row(line):
             table_rows = []
-            while i < len(lines) and (
-                is_table_row(lines[i]) or is_table_separator(lines[i])
-            ):
+            while i < len(lines) and (is_table_row(lines[i]) or is_table_separator(lines[i])):
                 if not is_table_separator(lines[i]):
                     table_rows.append(parse_table_row(lines[i]))
                 i += 1
@@ -866,7 +837,10 @@ def markdown_to_blocks(markdown: str) -> List[Dict[str, Any]]:
                 {
                     "object": "block",
                     "type": "code",
-                    "code": {"rich_text": create_rich_text(code), "language": language},
+                    "code": {
+                        "rich_text": [{"type": "text", "text": {"content": code}}],
+                        "language": language,
+                    },
                 }
             )
 
@@ -927,11 +901,11 @@ def markdown_to_blocks(markdown: str) -> List[Dict[str, Any]]:
 
 
 def concurrent_api_calls(
-    items: List[Any],
+    items: list[Any],
     fn: Callable[[Any], Any],
     max_workers: int = 3,
     label: str = "items",
-) -> List[Tuple[Any, Any]]:
+) -> list[tuple[Any, Any]]:
     """Run API calls concurrently while respecting rate limits.
 
     The rate_limit decorator on api_call handles per-request throttling.
@@ -946,7 +920,8 @@ def concurrent_api_calls(
     Returns:
         List of (item, result) tuples in completion order
     """
-    results: List[Tuple[Any, Any]] = []
+    results: list[tuple[Any, Any]] = []
+    failed_count = 0
     total = len(items)
 
     with ThreadPoolExecutor(max_workers=min(max_workers, total or 1)) as executor:
@@ -960,18 +935,25 @@ def concurrent_api_calls(
             except Exception as e:
                 print(f"  Error processing {label} {i}/{total}: {e}", file=sys.stderr)
                 results.append((item, None))
+                failed_count += 1
 
             if i % 10 == 0 or i == total:
                 print(f"  Processed {i}/{total} {label}...", file=sys.stderr)
+
+    if failed_count:
+        print(
+            f"  Warning: {failed_count}/{total} {label} failed",
+            file=sys.stderr,
+        )
 
     return results
 
 
 def concurrent_deletes(
-    block_ids: List[str],
+    block_ids: list[str],
     api_key: str,
     max_workers: int = 3,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     """Delete multiple blocks concurrently.
 
     Args:
@@ -997,9 +979,7 @@ def concurrent_deletes(
             print(f"  Error deleting {block_id}: {e}", file=sys.stderr)
             return False
 
-    results = concurrent_api_calls(
-        block_ids, delete_one, max_workers=max_workers, label="blocks"
-    )
+    results = concurrent_api_calls(block_ids, delete_one, max_workers=max_workers, label="blocks")
 
     deleted = sum(1 for _, success in results if success)
     failed = sum(1 for _, success in results if not success)

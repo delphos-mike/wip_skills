@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """Append blocks to a Notion page.
 
 Usage:
@@ -24,18 +28,18 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Any
 
 from notion_utils import (
-    load_api_key,
-    parse_notion_id,
     api_call,
-    markdown_to_blocks,
     create_rich_text,
+    load_api_key,
+    markdown_to_blocks,
+    parse_notion_id,
 )
 
 
-def append_blocks(page_id: str, blocks: List[Dict[str, Any]], api_key: str):
+def append_blocks(page_id: str, blocks: list[dict[str, Any]], api_key: str):
     """Append blocks to a page."""
     if not blocks:
         return {"object": "list", "results": []}
@@ -80,7 +84,7 @@ def main():
         page_id = parse_notion_id(args.page)
 
         # Determine blocks to append
-        blocks: List[Dict[str, Any]] = []
+        blocks: list[dict[str, Any]] = []
         if args.text:
             blocks = [
                 {
@@ -106,7 +110,7 @@ def main():
             blocks = data.get("blocks", [])
 
         print(f"Appending {len(blocks)} blocks to page...", file=sys.stderr)
-        result = append_blocks(page_id, blocks, api_key)
+        append_blocks(page_id, blocks, api_key)
 
         # Output result
         print(

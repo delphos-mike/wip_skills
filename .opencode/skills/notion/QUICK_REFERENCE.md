@@ -25,7 +25,8 @@
 | **Clear page** | `clear_page.py <page_id>` | ❌ |
 | **Delete blocks** | `delete_blocks.py <block_id1> <block_id2>` | ❌ |
 | **Find section** | `find_section.py <page_id> "Heading Text"` | N/A |
-| **Link pages** | `link_pages.py <source> <target1> <target2>` | ✅ |
+| **Find references** | `link_pages.py <page_id> --find-references` | N/A |
+| **Link pages** | `link_pages.py <page_id> --link "QUERY" <target_page_id>` | ✅ |
 | **Extract comments** | `extract_comments.py <page_id>` | N/A |
 | **Create comment** | `create_comment.py <page_id> "text"` | N/A |
 | **Comment on block** | `create_comment.py --block <block_id> "text"` | N/A |

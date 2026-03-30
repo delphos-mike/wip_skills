@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """Update an existing Notion block.
 
 Usage:
     update_block.py <block_id> --text "new content"
-    update_block.py <block_id> --markdown "## New heading"
+    update_block.py <block_id> --file content.txt
 
 Examples:
-    # Update paragraph
+    # Update paragraph text
     update_block.py <block_id> --text "Updated content"
-
-    # Update heading
-    update_block.py <block_id> --markdown "## Updated Heading"
 
     # Update from file
     update_block.py <block_id> --file content.txt
@@ -20,19 +21,16 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Optional
 
 from notion_utils import (
-    load_api_key,
-    parse_notion_id,
     api_call,
     create_rich_text,
+    load_api_key,
+    parse_notion_id,
 )
 
 
-def update_block(
-    block_id: str, content: str, api_key: str, block_type: Optional[str] = None
-):
+def update_block(block_id: str, content: str, api_key: str, block_type: str | None = None):
     """Update an existing block."""
 
     # Get current block to determine type
@@ -109,7 +107,7 @@ def main():
             content = file_path.read_text().strip()
 
         print(f"Updating block {block_id}...", file=sys.stderr)
-        result = update_block(block_id, content, api_key, args.type)
+        update_block(block_id, content, api_key, args.type)
 
         print(json.dumps({"success": True, "block_id": block_id}, indent=2))
 

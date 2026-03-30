@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """Find and link page references in Notion content.
 
 Usage:
@@ -17,16 +21,15 @@ import argparse
 import json
 import re
 import sys
-from typing import Dict, List, Any
 
-from notion_utils import load_api_key, parse_notion_id, api_call, get_all_blocks
+from notion_utils import api_call, get_all_blocks, load_api_key, parse_notion_id
 
 
-def extract_text(rich_text: List[Dict]) -> str:
+def extract_text(rich_text: list[dict]) -> str:
     return "".join([rt.get("plain_text", "") for rt in rich_text])
 
 
-def search_pages(query: str, api_key: str) -> List[Dict]:
+def search_pages(query: str, api_key: str) -> list[dict]:
     """Search for pages matching query."""
     data = {
         "query": query,
@@ -38,7 +41,7 @@ def search_pages(query: str, api_key: str) -> List[Dict]:
     return response.get("results", [])
 
 
-def find_potential_references(blocks: List[Dict]) -> List[Dict]:
+def find_potential_references(blocks: list[dict]) -> list[dict]:
     """Find potential page references in content."""
     references = []
 
@@ -72,7 +75,7 @@ def find_potential_references(blocks: List[Dict]) -> List[Dict]:
     return references
 
 
-def create_page_mention(page_id: str) -> Dict:
+def create_page_mention(page_id: str) -> dict:
     """Create a page mention rich_text object."""
     return {"type": "mention", "mention": {"type": "page", "page": {"id": page_id}}}
 
@@ -86,9 +89,7 @@ def main():
     parser.add_argument("page_id", help="Page ID")
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "--find-references", action="store_true", help="Find potential page references"
-    )
+    group.add_argument("--find-references", action="store_true", help="Find potential page references")
     group.add_argument(
         "--link",
         nargs=2,
@@ -115,17 +116,15 @@ def main():
                 if ref["text"] not in unique_refs:
                     unique_refs[ref["text"]] = ref
 
-            print(
-                f"\nFound {len(unique_refs)} potential references:\n", file=sys.stderr
-            )
+            print(f"\nFound {len(unique_refs)} potential references:\n", file=sys.stderr)
 
-            for ref_text, ref in unique_refs.items():
+            for ref_text, _ref in unique_refs.items():
                 # Try to find matching pages
                 matches = search_pages(ref_text, api_key)
 
                 print(f"  '{ref_text}'", file=sys.stderr)
                 if matches:
-                    print(f"    Possible matches:", file=sys.stderr)
+                    print("    Possible matches:", file=sys.stderr)
                     for match in matches[:3]:
                         title = (
                             match.get("properties", {})
@@ -135,7 +134,7 @@ def main():
                         )
                         print(f"      - {title} ({match['id']})", file=sys.stderr)
                 else:
-                    print(f"    No matches found", file=sys.stderr)
+                    print("    No matches found", file=sys.stderr)
                 print(file=sys.stderr)
 
             # Output JSON
@@ -156,10 +155,7 @@ def main():
                 print(f"Found {len(matches)} matching pages:", file=sys.stderr)
                 for idx, match in enumerate(matches, 1):
                     title = (
-                        match.get("properties", {})
-                        .get("title", {})
-                        .get("title", [{}])[0]
-                        .get("plain_text", "Untitled")
+                        match.get("properties", {}).get("title", {}).get("title", [{}])[0].get("plain_text", "Untitled")
                     )
                     print(f"  {idx}. {title} ({match['id']})", file=sys.stderr)
 

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """Sync page content while preserving comments.
 
 Uses diff algorithm to:
@@ -22,20 +26,19 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
 
 from notion_utils import (
-    load_api_key,
     api_call,
-    parse_notion_id,
-    get_all_blocks,
-    is_interactive,
     concurrent_api_calls,
     concurrent_deletes,
+    get_all_blocks,
+    is_interactive,
+    load_api_key,
+    parse_notion_id,
 )
 
 
-def extract_text_content(block: Dict) -> str:
+def extract_text_content(block: dict) -> str:
     """Extract text content from block for comparison."""
     block_type = block.get("type", "")
     content = block.get(block_type, {})
@@ -45,14 +48,14 @@ def extract_text_content(block: Dict) -> str:
     return ""
 
 
-def compute_content_hash(block: Dict) -> str:
+def compute_content_hash(block: dict) -> str:
     """Compute a hash of block content for verification."""
     block_type = block.get("type", "")
     content_str = f"{block_type}:{extract_text_content(block)}"
     return hashlib.sha256(content_str.encode()).hexdigest()[:12]
 
 
-def blocks_match(old_block: Dict, new_block: Dict) -> bool:
+def blocks_match(old_block: dict, new_block: dict) -> bool:
     """Check if blocks represent the same content."""
     if old_block.get("type") != new_block.get("type"):
         return False
@@ -63,9 +66,7 @@ def blocks_match(old_block: Dict, new_block: Dict) -> bool:
     return old_text == new_text
 
 
-def compute_match_confidence(
-    old_blocks: List[Dict], new_blocks: List[Dict]
-) -> Tuple[float, List[str]]:
+def compute_match_confidence(old_blocks: list[dict], new_blocks: list[dict]) -> tuple[float, list[str]]:
     """Compute confidence score for position-based matching.
 
     Returns:
@@ -84,7 +85,6 @@ def compute_match_confidence(
 
     # Find blocks that appear to have moved
     old_hash_set = set(old_hashes)
-    new_hash_set = set(new_hashes)
 
     # Blocks in new but not in old positions where they were
     position_mismatches = 0
@@ -101,9 +101,7 @@ def compute_match_confidence(
     if len(new_blocks) > 0 and len(old_blocks) > 0:
         if new_hashes[0] not in old_hash_set:
             if old_hashes[0] in new_hashes[1:]:
-                warnings.append(
-                    "New content inserted at the beginning - all positions shifted"
-                )
+                warnings.append("New content inserted at the beginning - all positions shifted")
 
     # Compute confidence score
     if not warnings:
@@ -116,7 +114,7 @@ def compute_match_confidence(
     return confidence, warnings
 
 
-def update_block(block_id: str, new_block: Dict, api_key: str):
+def update_block(block_id: str, new_block: dict, api_key: str):
     """Update existing block (preserves comments)."""
     block_type = new_block["type"]
     data = {block_type: new_block[block_type]}
@@ -125,7 +123,7 @@ def update_block(block_id: str, new_block: Dict, api_key: str):
     return response
 
 
-def create_block(parent_id: str, block: Dict, api_key: str):
+def create_block(parent_id: str, block: dict, api_key: str):
     """Create new block."""
     data = {"children": [block]}
     response = api_call(f"blocks/{parent_id}/children", api_key, "PATCH", data)
@@ -139,8 +137,8 @@ def delete_block(block_id: str, api_key: str):
 
 def sync_blocks(
     page_id: str,
-    old_blocks: List[Dict],
-    new_blocks: List[Dict],
+    old_blocks: list[dict],
+    new_blocks: list[dict],
     api_key: str,
     delete_removed: bool = False,
     force: bool = False,
@@ -242,7 +240,7 @@ def sync_blocks(
             f"  Deleting {len(blocks_to_delete)} blocks (COMMENTS WILL BE LOST)...",
             file=sys.stderr,
         )
-        deleted, failed = concurrent_deletes(blocks_to_delete, api_key)
+        deleted, _failed = concurrent_deletes(blocks_to_delete, api_key)
         stats["deleted"] = deleted
 
     return stats
@@ -261,9 +259,7 @@ def main():
         action="store_true",
         help="Delete blocks not in new content (loses comments!)",
     )
-    parser.add_argument(
-        "--force", "-f", action="store_true", help="Skip confidence checks and warnings"
-    )
+    parser.add_argument("--force", "-f", action="store_true", help="Skip confidence checks and warnings")
 
     args = parser.parse_args()
 
@@ -292,15 +288,11 @@ def main():
         print("Fetching current page state...", file=sys.stderr)
         old_blocks = get_all_blocks(page_id, api_key)
 
-        print(
-            f"\nSyncing: {len(old_blocks)} old → {len(new_blocks)} new", file=sys.stderr
-        )
+        print(f"\nSyncing: {len(old_blocks)} old → {len(new_blocks)} new", file=sys.stderr)
 
-        stats = sync_blocks(
-            page_id, old_blocks, new_blocks, api_key, args.delete_removed, args.force
-        )
+        stats = sync_blocks(page_id, old_blocks, new_blocks, api_key, args.delete_removed, args.force)
 
-        print(f"\n✓ Sync complete:", file=sys.stderr)
+        print("\n✓ Sync complete:", file=sys.stderr)
         print(f"  Unchanged: {stats['unchanged']}", file=sys.stderr)
         print(f"  Updated: {stats['updated']}", file=sys.stderr)
         print(f"  Created: {stats['created']}", file=sys.stderr)

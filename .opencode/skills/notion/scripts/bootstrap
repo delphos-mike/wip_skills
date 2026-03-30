@@ -1,64 +1,65 @@
 #!/usr/bin/env bash
 # Setup script for Notion skill
 # Follows "Scripts to Rule Them All" pattern
+#
+# Prerequisites: uv, op (1Password CLI)
+# This script verifies prerequisites and pre-fetches the API key.
 
 set -e
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV_DIR="$SKILL_DIR/.venv"
 
 echo "==> Bootstrapping Notion skill..."
 
-# Check for Python 3
-if ! command -v python3 &> /dev/null; then
-    echo "Error: python3 not found. Please install Python 3.8 or later."
+# ── Required: uv ────────────────────────────────────────────────────
+if ! command -v uv &> /dev/null; then
+    echo "Error: uv not found. Install it: https://docs.astral.sh/uv/"
     exit 1
 fi
+echo "✓ uv $(uv --version | awk '{print $2}')"
 
-# Create virtual environment if it doesn't exist
-if [ ! -d "$VENV_DIR" ]; then
-    echo "==> Creating Python virtual environment..."
-    python3 -m venv "$VENV_DIR"
+# ── Required: 1Password CLI ────────────────────────────────────────
+if ! command -v op &> /dev/null; then
+    echo "Error: 1Password CLI (op) not found."
+    echo "Install it: https://developer.1password.com/docs/cli/get-started/"
+    exit 1
+fi
+echo "✓ op $(op --version)"
+
+# ── Pre-warm: resolve script dependencies ───────────────────────────
+echo "==> Pre-resolving Python dependencies..."
+if uv run --quiet "$SKILL_DIR/scripts/search_pages.py" --help > /dev/null 2>&1; then
+    echo "✓ Python dependencies cached"
+else
+    echo "⚠ Warning: Failed to pre-resolve Python dependencies."
+    echo "  Scripts may take longer on first run while dependencies are fetched."
 fi
 
-# Activate virtual environment
-echo "==> Activating virtual environment..."
-source "$VENV_DIR/bin/activate"
+# ── API key: env var → cached file → 1Password ─────────────────────
+SECRETS_DIR="$SKILL_DIR/.secrets"
+CACHED_KEY="$SECRETS_DIR/notion_api_key"
+OP_REF="${NOTION_OP_REF:-op://it-ops-helpers/NOTION_SKILL_INTEGRATION/credential}"
 
-# Upgrade pip
-echo "==> Upgrading pip..."
-pip install --quiet --upgrade pip
-
-# Install dependencies
-echo "==> Installing dependencies..."
-if [ -f "$SKILL_DIR/requirements.txt" ]; then
-    pip install --quiet -r "$SKILL_DIR/requirements.txt"
-else
-    # Fallback if requirements.txt doesn't exist yet
-    pip install --quiet requests
-fi
-
-# Verify installation
-echo "==> Verifying installation..."
-python3 -c "import requests; print(f'✓ requests {requests.__version__}')"
-
-# Check for API key in environment
-if [ -z "${NOTION_API_KEY:-}" ]; then
-    echo ""
-    echo "⚠️  NOTION_API_KEY not set in environment!"
-    echo ""
-    echo "To complete setup:"
-    echo "  1. Create integration at https://www.notion.so/my-integrations"
-    echo "  2. Copy your API key"
-    echo "  3. Export it: export NOTION_API_KEY=ntn_..."
-    echo "     (add to your shell profile for persistence)"
-    echo ""
-else
+if [ -n "${NOTION_API_KEY:-}" ]; then
     echo "✓ NOTION_API_KEY found in environment"
+elif [ -f "$CACHED_KEY" ] && [ -s "$CACHED_KEY" ]; then
+    echo "✓ Cached API key found at $CACHED_KEY"
+else
+    echo "==> Fetching Notion API key from 1Password..."
+    if KEY=$(op read "$OP_REF" 2>/dev/null); then
+        mkdir -p "$SECRETS_DIR"
+        chmod 700 "$SECRETS_DIR"
+        echo "$KEY" > "$CACHED_KEY"
+        chmod 600 "$CACHED_KEY"
+        echo "✓ API key fetched from 1Password and cached"
+    else
+        echo "Error: 1Password lookup failed."
+        echo "  Reference: $OP_REF"
+        echo "  Make sure you are signed in: eval \$(op signin)"
+        exit 1
+    fi
 fi
 
 echo ""
 echo "✓ Bootstrap complete!"
-echo ""
-echo "The virtual environment is at: $VENV_DIR"
-echo "Scripts will automatically use this environment."
+echo "  Scripts are run via: uv run <skill_dir>/scripts/<script>.py"

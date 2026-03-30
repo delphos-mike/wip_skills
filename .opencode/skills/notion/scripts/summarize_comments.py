@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """Summarize Notion comments from extracted JSON.
 
 Usage:
@@ -14,19 +18,20 @@ import json
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Any
 
-from notion_utils import load_api_key, api_call
+from notion_utils import api_call, load_api_key
 
 
-def get_user_info(user_id: str, api_key: str) -> Dict[str, Any]:
+def get_user_info(user_id: str, api_key: str) -> dict[str, Any]:
     """Fetch user details from Notion API."""
     if not api_key:
         return {"name": user_id, "id": user_id}
 
     try:
         return api_call(f"users/{user_id}", api_key)
-    except Exception:
+    except Exception as e:
+        print(f"  Warning: Could not look up user {user_id}: {e}", file=sys.stderr)
         return {"name": user_id, "id": user_id}
 
 
@@ -50,10 +55,10 @@ def summarize_comments(comments_file: Path, output_dir: Path):
     # Load API key for user lookups
     try:
         api_key = load_api_key()
-    except:
+    except (RuntimeError, OSError) as e:
         api_key = None
         print(
-            "Warning: No API key found, using user IDs instead of names",
+            f"Warning: Could not load API key ({e}), user names will show as IDs",
             file=sys.stderr,
         )
 
@@ -80,14 +85,12 @@ def summarize_comments(comments_file: Path, output_dir: Path):
         discussions[disc_id].append(comment)
 
     # Generate markdown report
-    report_file = (
-        output_dir / f"{page_title.replace(' ', '_').lower()}_comments_report.md"
-    )
+    report_file = output_dir / f"{page_title.replace(' ', '_').lower()}_comments_report.md"
 
     with open(report_file, "w") as f:
         f.write(f"# {page_title} - Comment Analysis\n\n")
         f.write(f"**Page ID:** `{page_id}`\n\n")
-        f.write(f"---\n\n")
+        f.write("---\n\n")
 
         f.write("## Summary Statistics\n\n")
         f.write(f"- **Total Comments:** {len(comments)}\n")
@@ -98,9 +101,7 @@ def summarize_comments(comments_file: Path, output_dir: Path):
         f.write("## Comments by User\n\n")
 
         # Sort by comment count
-        sorted_users = sorted(
-            comments_by_user.items(), key=lambda x: len(x[1]), reverse=True
-        )
+        sorted_users = sorted(comments_by_user.items(), key=lambda x: len(x[1]), reverse=True)
 
         for user_id, user_comments in sorted_users:
             user_name = user_cache.get(user_id, user_id)
@@ -118,9 +119,7 @@ def summarize_comments(comments_file: Path, output_dir: Path):
         f.write("## Discussion Threads\n\n")
 
         # Sort discussions by comment count
-        sorted_discussions = sorted(
-            discussions.items(), key=lambda x: len(x[1]), reverse=True
-        )
+        sorted_discussions = sorted(discussions.items(), key=lambda x: len(x[1]), reverse=True)
 
         for disc_id, disc_comments in sorted_discussions:
             f.write(f"### Discussion: `{disc_id}`\n\n")
@@ -131,9 +130,7 @@ def summarize_comments(comments_file: Path, output_dir: Path):
             f.write(f"**Participants:** {len(participants)}\n")
 
             # Get context from first comment
-            first_comment = sorted(
-                disc_comments, key=lambda x: x.get("created_time", "")
-            )[0]
+            first_comment = sorted(disc_comments, key=lambda x: x.get("created_time", ""))[0]
             context = first_comment.get("block_context", "")[:150]
             if len(first_comment.get("block_context", "")) > 150:
                 context += "..."
@@ -142,12 +139,8 @@ def summarize_comments(comments_file: Path, output_dir: Path):
 
             # Show thread
             f.write("**Thread:**\n\n")
-            for comment in sorted(
-                disc_comments, key=lambda x: x.get("created_time", "")
-            ):
-                user_name = user_cache.get(
-                    comment.get("created_by"), comment.get("created_by", "Unknown")
-                )
+            for comment in sorted(disc_comments, key=lambda x: x.get("created_time", "")):
+                user_name = user_cache.get(comment.get("created_by"), comment.get("created_by", "Unknown"))
                 comment_text = comment.get("comment_text", "")
                 timestamp = comment.get("created_time", "")
 
@@ -169,9 +162,7 @@ def summarize_comments(comments_file: Path, output_dir: Path):
             f.write(f"### {user_name} - All Comments\n\n")
 
             # Sort by time
-            sorted_comments = sorted(
-                user_comments, key=lambda x: x.get("created_time", "")
-            )
+            sorted_comments = sorted(user_comments, key=lambda x: x.get("created_time", ""))
 
             for idx, comment in enumerate(sorted_comments, 1):
                 f.write(f"#### Comment {idx}/{len(user_comments)}\n\n")
@@ -190,9 +181,7 @@ def summarize_comments(comments_file: Path, output_dir: Path):
     print(f"✓ Report saved to: {report_file}", file=sys.stderr)
 
     # Generate text summary
-    summary_file = (
-        output_dir / f"{page_title.replace(' ', '_').lower()}_comments_summary.txt"
-    )
+    summary_file = output_dir / f"{page_title.replace(' ', '_').lower()}_comments_summary.txt"
 
     with open(summary_file, "w") as f:
         f.write(f"COMMENT SUMMARY: {page_title}\n")
@@ -208,9 +197,7 @@ def summarize_comments(comments_file: Path, output_dir: Path):
             f.write(f"COMMENTS: {len(user_comments)}\n")
             f.write(f"{'-' * 80}\n\n")
 
-            for idx, comment in enumerate(
-                sorted(user_comments, key=lambda x: x.get("created_time", "")), 1
-            ):
+            for idx, comment in enumerate(sorted(user_comments, key=lambda x: x.get("created_time", "")), 1):
                 f.write(f"Comment {idx}:\n")
                 f.write(f"  Time: {comment.get('created_time')}\n")
                 f.write(f"  Context: {comment.get('block_context', '')[:100]}...\n")
@@ -238,9 +225,7 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument("comments_file", help="Path to comments JSON file")
-    parser.add_argument(
-        "--output", "-o", default="/tmp", help="Output directory (default: /tmp)"
-    )
+    parser.add_argument("--output", "-o", default="/tmp", help="Output directory (default: /tmp)")
 
     args = parser.parse_args()
 
@@ -259,7 +244,7 @@ def main():
         print(f"Error: {e}", file=sys.stderr)
         import traceback
 
-        traceback.print_exc()
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 

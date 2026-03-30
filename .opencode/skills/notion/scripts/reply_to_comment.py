@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """Reply to an existing comment discussion thread in Notion.
 
 Requires a discussion_id, which can be obtained from extract_comments.py
@@ -26,8 +30,8 @@ import json
 import sys
 from pathlib import Path
 
-from notion_utils import load_api_key
 from create_comment import create_comment
+from notion_utils import load_api_key
 
 
 def main():
@@ -76,6 +80,9 @@ def main():
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 

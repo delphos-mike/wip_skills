@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
-# Wrapper to run Notion skill scripts with proper Python environment
+# Run Notion skill scripts via uv.
 # Usage: scripts/run script_name.py [args...]
 #
-# The Python scripts auto-bootstrap their own venv via notion_utils.py,
-# so this wrapper is optional. It just provides a convenient entry point
-# that skips the re-exec overhead if the venv already exists.
+# uv reads PEP 723 inline metadata from each script to resolve
+# dependencies. No venv or manual install needed.
 
 set -e
 
-SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV_DIR="$SKILL_DIR/.venv"
-SCRIPTS_DIR="$SKILL_DIR/scripts"
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Get script name
+if [ "$#" -lt 1 ]; then
+    echo "Usage: $(basename "$0") script_name.py [args...]" >&2
+    echo "Error: Missing script name." >&2
+    echo "Available scripts:" >&2
+    ls "$SCRIPTS_DIR"/*.py 2>/dev/null | xargs -n1 basename >&2
+    exit 1
+fi
+
 SCRIPT="$1"
 shift
 
@@ -23,9 +27,4 @@ if [ ! -f "$SCRIPTS_DIR/$SCRIPT" ]; then
     exit 1
 fi
 
-# Use venv python if available, otherwise system python (will auto-bootstrap)
-if [ -x "$VENV_DIR/bin/python3" ]; then
-    exec "$VENV_DIR/bin/python3" "$SCRIPTS_DIR/$SCRIPT" "$@"
-else
-    exec python3 "$SCRIPTS_DIR/$SCRIPT" "$@"
-fi
+exec uv run "$SCRIPTS_DIR/$SCRIPT" "$@"

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """⚠️  WARNING: DELETES BLOCKS AND THEIR COMMENTS!
 
 Delete blocks from a Notion page.
@@ -29,11 +33,11 @@ import json
 import sys
 
 from notion_utils import (
+    concurrent_deletes,
+    get_all_blocks,
+    is_interactive,
     load_api_key,
     parse_notion_id,
-    get_all_blocks,
-    concurrent_deletes,
-    is_interactive,
 )
 
 
@@ -52,9 +56,7 @@ def confirm_delete(count: int, extra: str = "") -> bool:
     print("\n" + "=" * 70, file=sys.stderr)
     print("WARNING: DANGEROUS OPERATION", file=sys.stderr)
     print("=" * 70, file=sys.stderr)
-    print(
-        f"\nThis will DELETE {count} BLOCKS{extra} and their COMMENTS!", file=sys.stderr
-    )
+    print(f"\nThis will DELETE {count} BLOCKS{extra} and their COMMENTS!", file=sys.stderr)
     print("\n" + "=" * 70, file=sys.stderr)
     response = input("\nType 'yes' to delete blocks and proceed: ")
     if response != "yes":
@@ -79,9 +81,7 @@ def main():
         metavar=("PAGE_ID", "START", "END"),
         help="Delete range of blocks (positions)",
     )
-    parser.add_argument(
-        "--yes", "-y", action="store_true", help="Skip confirmation prompt"
-    )
+    parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
     args = parser.parse_args()
 

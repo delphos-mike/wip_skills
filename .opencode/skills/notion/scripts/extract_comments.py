@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """Extract comments from a Notion page.
 
 Usage:
@@ -12,42 +16,41 @@ Examples:
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any
 
-from notion_utils import load_api_key, api_call, parse_notion_id, concurrent_api_calls
+from notion_utils import api_call, concurrent_api_calls, get_all_blocks, load_api_key, parse_notion_id
 
 
-def get_page_info(page_id: str, api_key: str) -> Dict[str, Any]:
+def get_page_info(page_id: str, api_key: str) -> dict[str, Any]:
     """Get page metadata."""
     return api_call(f"pages/{page_id}", api_key)
 
 
-def get_page_blocks(page_id: str, api_key: str) -> List[Dict[str, Any]]:
-    """Get all blocks from a page."""
-    blocks = []
-    cursor = None
+def get_page_blocks(page_id: str, api_key: str) -> list[dict[str, Any]]:
+    """Get all blocks from a page, including nested children.
 
-    while True:
-        endpoint = f"blocks/{page_id}/children?page_size=100"
-        if cursor:
-            endpoint += f"&start_cursor={cursor}"
+    Uses get_all_blocks for recursive fetch so comments on nested blocks
+    (list children, toggles, table rows, etc.) are not missed.
+    """
+    all_blocks = get_all_blocks(page_id, api_key)
 
-        response = api_call(endpoint, api_key)
+    # Flatten the recursive tree into a flat list for comment extraction
+    flat = []
 
-        if "results" in response:
-            blocks.extend(response["results"])
+    def _flatten(blocks):
+        for b in blocks:
+            flat.append(b)
+            if "children" in b:
+                _flatten(b["children"])
 
-        if not response.get("has_more", False):
-            break
-
-        cursor = response.get("next_cursor")
-
-    return blocks
+    _flatten(all_blocks)
+    return flat
 
 
-def extract_text_from_block(block: Dict[str, Any]) -> str:
+def extract_text_from_block(block: dict[str, Any]) -> str:
     """Extract readable text from a block."""
     block_type = block.get("type", "")
     block_content = block.get(block_type, {})
@@ -80,7 +83,7 @@ def build_comment_link(page_id: str, discussion_id: str) -> str:
     return f"https://www.notion.so/{clean_page_id}?p={clean_discussion_id}&pm=c"
 
 
-def extract_comments(page_id: str, api_key: str, output_dir: Path) -> Dict[str, Any]:
+def extract_comments(page_id: str, api_key: str, output_dir: Path) -> dict[str, Any]:
     """Extract all comments from a page."""
     print(f"Fetching page info for {page_id}...", file=sys.stderr)
     page_info = get_page_info(page_id, api_key)
@@ -92,21 +95,20 @@ def extract_comments(page_id: str, api_key: str, output_dir: Path) -> Dict[str, 
     # Get page title
     page_title = "Untitled"
     if "properties" in page_info:
-        for prop_name, prop_data in page_info["properties"].items():
+        for _prop_name, prop_data in page_info["properties"].items():
             if prop_data.get("type") == "title" and prop_data.get("title"):
-                page_title = "".join(
-                    [t.get("plain_text", "") for t in prop_data["title"]]
-                )
+                page_title = "".join([t.get("plain_text", "") for t in prop_data["title"]])
                 break
 
     print(f"Page: {page_title}", file=sys.stderr)
-    print(f"Fetching blocks...", file=sys.stderr)
+    print("Fetching blocks...", file=sys.stderr)
 
     blocks = get_page_blocks(page_id, api_key)
     print(f"Found {len(blocks)} blocks", file=sys.stderr)
 
     # Save blocks for reference
-    blocks_file = output_dir / f"{page_title.replace(' ', '_').lower()}_blocks.json"
+    safe_title = re.sub(r"[^\w\-]", "_", page_title.lower())[:100]
+    blocks_file = output_dir / f"{safe_title}_blocks.json"
     with open(blocks_file, "w") as f:
         json.dump({"results": blocks}, f, indent=2)
 
@@ -114,7 +116,7 @@ def extract_comments(page_id: str, api_key: str, output_dir: Path) -> Dict[str, 
     blocks_with_comments = 0
 
     # Fetch page-level comments first (comments not attached to a specific block)
-    print(f"\nFetching page-level comments...", file=sys.stderr)
+    print("\nFetching page-level comments...", file=sys.stderr)
     page_level_comments = []
     cursor = None
     while True:
@@ -130,13 +132,9 @@ def extract_comments(page_id: str, api_key: str, output_dir: Path) -> Dict[str, 
     if page_level_comments:
         print(f"  Page-level: {len(page_level_comments)} comments", file=sys.stderr)
         for comment in page_level_comments:
-            comment_text = "".join(
-                [rt.get("plain_text", "") for rt in comment.get("rich_text", [])]
-            )
+            comment_text = "".join([rt.get("plain_text", "") for rt in comment.get("rich_text", [])])
             discussion_id = comment.get("discussion_id")
-            comment_link = (
-                build_comment_link(page_id, discussion_id) if discussion_id else None
-            )
+            comment_link = build_comment_link(page_id, discussion_id) if discussion_id else None
             comment_info = {
                 "page_id": page_id,
                 "page_title": page_title,
@@ -154,9 +152,7 @@ def extract_comments(page_id: str, api_key: str, output_dir: Path) -> Dict[str, 
             all_comments.append(comment_info)
 
     # Fetch block-level comments concurrently
-    print(
-        f"Fetching comments for {len(blocks)} blocks concurrently...", file=sys.stderr
-    )
+    print(f"Fetching comments for {len(blocks)} blocks concurrently...", file=sys.stderr)
 
     def fetch_comments_for_block(block):
         """Fetch comments for a single block (runs in thread pool)."""
@@ -165,9 +161,7 @@ def extract_comments(page_id: str, api_key: str, output_dir: Path) -> Dict[str, 
         response = api_call(endpoint, api_key)
         return response.get("results", [])
 
-    results = concurrent_api_calls(
-        blocks, fetch_comments_for_block, max_workers=3, label="blocks"
-    )
+    results = concurrent_api_calls(blocks, fetch_comments_for_block, max_workers=3, label="blocks")
 
     for block, comments in results:
         if not comments:
@@ -181,14 +175,10 @@ def extract_comments(page_id: str, api_key: str, output_dir: Path) -> Dict[str, 
         print(f"  Block {block_type}: {len(comments)} comments", file=sys.stderr)
 
         for comment in comments:
-            comment_text = "".join(
-                [rt.get("plain_text", "") for rt in comment.get("rich_text", [])]
-            )
+            comment_text = "".join([rt.get("plain_text", "") for rt in comment.get("rich_text", [])])
 
             discussion_id = comment.get("discussion_id")
-            comment_link = (
-                build_comment_link(page_id, discussion_id) if discussion_id else None
-            )
+            comment_link = build_comment_link(page_id, discussion_id) if discussion_id else None
 
             comment_info = {
                 "page_id": page_id,
@@ -216,7 +206,7 @@ def extract_comments(page_id: str, api_key: str, output_dir: Path) -> Dict[str, 
     )
 
     # Save comments
-    comments_file = output_dir / f"{page_title.replace(' ', '_').lower()}_comments.json"
+    comments_file = output_dir / f"{safe_title}_comments.json"
     with open(comments_file, "w") as f:
         json.dump(all_comments, f, indent=2)
 
@@ -240,9 +230,7 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument("page", help="Notion page URL or ID")
-    parser.add_argument(
-        "--output", "-o", default="/tmp", help="Output directory (default: /tmp)"
-    )
+    parser.add_argument("--output", "-o", default="/tmp", help="Output directory (default: /tmp)")
 
     args = parser.parse_args()
 
@@ -259,6 +247,9 @@ def main():
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 

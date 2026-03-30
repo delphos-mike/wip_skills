@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """Search for Notion pages.
 
 Usage:
@@ -9,15 +13,16 @@ Examples:
     search_pages.py "RFC" --limit 10
     search_pages.py "design" --output json
 """
+
 import argparse
 import json
 import sys
-from typing import Dict, List, Any
+from typing import Any
 
-from notion_utils import load_api_key, api_call
+from notion_utils import api_call, load_api_key
 
 
-def search_pages(query: str, api_key: str, limit: int = 20) -> List[Dict[str, Any]]:
+def search_pages(query: str, api_key: str, limit: int = 20) -> list[dict[str, Any]]:
     """Search for pages matching query."""
     all_results = []
     cursor = None
@@ -26,39 +31,39 @@ def search_pages(query: str, api_key: str, limit: int = 20) -> List[Dict[str, An
         data = {
             "query": query,
             "filter": {"property": "object", "value": "page"},
-            "page_size": min(100, limit - len(all_results))
+            "page_size": min(100, limit - len(all_results)),
         }
 
         if cursor:
             data["start_cursor"] = cursor
 
-        response = api_call('search', api_key, 'POST', data)
+        response = api_call("search", api_key, "POST", data)
 
-        if 'results' in response:
-            all_results.extend(response['results'])
+        if "results" in response:
+            all_results.extend(response["results"])
 
-        if not response.get('has_more', False):
+        if not response.get("has_more", False):
             break
 
-        cursor = response.get('next_cursor')
+        cursor = response.get("next_cursor")
 
     return all_results[:limit]
 
 
-def extract_title(page: Dict[str, Any]) -> str:
+def extract_title(page: dict[str, Any]) -> str:
     """Extract page title from properties."""
-    if 'properties' not in page:
+    if "properties" not in page:
         return "Untitled"
 
-    for prop_name, prop_data in page['properties'].items():
-        if prop_data.get('type') == 'title':
-            title_array = prop_data.get('title', [])
-            return ''.join([t.get('plain_text', '') for t in title_array]) or "Untitled"
+    for _prop_name, prop_data in page["properties"].items():
+        if prop_data.get("type") == "title":
+            title_array = prop_data.get("title", [])
+            return "".join([t.get("plain_text", "") for t in title_array]) or "Untitled"
 
     return "Untitled"
 
 
-def format_table(results: List[Dict[str, Any]]):
+def format_table(results: list[dict[str, Any]]):
     """Format results as a table."""
     if not results:
         print("No results found")
@@ -70,8 +75,8 @@ def format_table(results: List[Dict[str, Any]]):
 
     for idx, page in enumerate(results, 1):
         title = extract_title(page)
-        page_id = page['id']
-        url = page.get('url', '')
+        page_id = page["id"]
+        url = page.get("url", "")
 
         # Truncate long titles
         if len(title) > 47:
@@ -82,15 +87,13 @@ def format_table(results: List[Dict[str, Any]]):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Search for Notion pages',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        description="Search for Notion pages", formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__
     )
-    parser.add_argument('query', help='Search query')
-    parser.add_argument('--limit', '-l', type=int, default=20,
-                       help='Maximum number of results (default: 20)')
-    parser.add_argument('--output', '-o', choices=['json', 'table'], default='table',
-                       help='Output format (default: table)')
+    parser.add_argument("query", help="Search query")
+    parser.add_argument("--limit", "-l", type=int, default=20, help="Maximum number of results (default: 20)")
+    parser.add_argument(
+        "--output", "-o", choices=["json", "table"], default="table", help="Output format (default: table)"
+    )
 
     args = parser.parse_args()
 
@@ -98,13 +101,9 @@ def main():
         api_key = load_api_key()
         results = search_pages(args.query, api_key, args.limit)
 
-        if args.output == 'json':
+        if args.output == "json":
             # Output full JSON for programmatic use
-            output = {
-                'query': args.query,
-                'count': len(results),
-                'results': results
-            }
+            output = {"query": args.query, "count": len(results), "results": results}
             print(json.dumps(output, indent=2))
         else:
             # Human-readable table
@@ -112,8 +111,11 @@ def main():
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

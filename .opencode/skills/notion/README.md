@@ -2,89 +2,76 @@
 
 Complete Notion document management via API. Search, read, write, update, delete, and analyze content.
 
+## Prerequisites
+
+- **uv** — Python package manager ([install](https://docs.astral.sh/uv/))
+- **op** — 1Password CLI ([install](https://developer.1password.com/docs/cli/get-started/)), authenticated with access to the `it-ops-helpers` vault
+
 ## Quick Setup
 
 ```bash
-# 1. Configure API key
-export NOTION_API_KEY=ntn_...
-# (add to your shell profile to persist)
+# 1. Run bootstrap to verify prerequisites and fetch API key
+./scripts/bootstrap
 
-# 2. Share integration with your Notion pages
-# In Notion: Page → ••• → Connections → Add your integration
+# 2. Share the Notion integration with your pages
+# In Notion: Page → ••• → Connections → Add "Notion Skill Integration"
 
-# 3. Test it (auto-bootstraps on first run)
-python3 .opencode/skills/notion/scripts/search_pages.py "test"
+# 3. Test it
+uv run scripts/search_pages.py "test"
 ```
 
-That's it. No manual `bootstrap` or `pip install` needed — scripts auto-detect
-whether a virtual environment exists, create one if missing (using `uv` for
-speed, or `pip` as fallback), install dependencies, and re-exec under the venv
-Python. Subsequent runs skip bootstrap entirely.
+No venv or manual `pip install` needed — each script declares its dependencies
+via PEP 723 inline metadata, and `uv run` resolves them automatically.
 
-## Environment Management
+## API Key
 
-Scripts use an isolated `.venv/` inside the skill directory. This is created
-and managed automatically.
+The API key is fetched from 1Password and cached locally:
 
-| Scenario | What happens |
-|----------|-------------|
-| First run, no `.venv/` | Auto-creates venv, installs deps, re-execs |
-| Subsequent runs | Detects venv, re-execs under venv Python |
-| Deps missing | Delete `.venv/`, next run re-bootstraps |
+1. `NOTION_API_KEY` environment variable (if set)
+2. Cached key in `.secrets/notion_api_key` (persists across sessions)
+3. `op read "op://it-ops-helpers/NOTION_SKILL_INTEGRATION/credential"` (auto-cached)
 
-### Manual usage (optional)
+## Running Scripts
 
 ```bash
-source .venv/bin/activate
-python3 scripts/read_page.py <page-id>
-deactivate
+uv run scripts/search_pages.py "query"
+uv run scripts/read_page.py <page_id> --output markdown
+uv run scripts/append_blocks.py <page_id> --markdown "## New Section"
 ```
 
-Or use the wrapper script:
-```bash
-scripts/run read_page.py <page-id>
-```
-
-## Installation for Other Users
-
-1. Clone the repo containing this skill
-2. Create a Notion integration at [notion.so/my-integrations](https://www.notion.so/my-integrations)
-3. Export `NOTION_API_KEY` in your environment
-4. Share pages with the integration in Notion
-5. Run any script — auto-bootstrap handles the rest
+Or use the wrapper: `scripts/run read_page.py <page_id>`
 
 ## Dependencies
 
-- Python 3.8+
-- `requests>=2.31.0` (auto-installed by bootstrap)
+- Python >=3.9
+- `requests>=2.31.0` (resolved by `uv run` from PEP 723 metadata)
 
 ## Files
 
 ```
 notion/
 ├── scripts/
-│   ├── notion_utils.py   # Shared utilities + auto-bootstrap
-│   ├── run               # Optional wrapper script
-│   ├── bootstrap          # Legacy setup script (still works)
-│   └── *.py              # 15 command scripts
-├── requirements.txt      # Python dependencies
-├── SKILL.md             # Agent-facing documentation (loaded by skill system)
-├── QUICK_REFERENCE.md   # Quick command lookup
-└── .venv/               # Virtual environment (auto-created)
+│   ├── notion_utils.py   # Shared utilities (API calls, markdown, rate limiting)
+│   ├── run               # Wrapper script (delegates to uv run)
+│   ├── bootstrap         # Setup: verifies uv + op, fetches API key
+│   └── *.py              # 19 entry-point scripts
+├── tests/
+│   └── integration/      # 45 integration tests against live Notion API
+├── SKILL.md              # Agent-facing documentation (loaded by skill system)
+├── QUICK_REFERENCE.md    # Quick command lookup
+├── api-reference.md      # Notion API reference notes
+└── .gitignore
 ```
 
 ## Troubleshooting
 
-### "ModuleNotFoundError: No module named 'requests'"
-Delete `.venv/` in the skill directory and run any script — it will re-bootstrap.
-
-### API key issues
-```bash
-echo $NOTION_API_KEY  # Should show ntn_...
-```
-
-### Permission issues
-Open page in Notion → ••• → Connections → verify your integration is listed.
+| Problem | Solution |
+|---------|----------|
+| "ModuleNotFoundError: requests" | Run scripts via `uv run`, not `python3` directly |
+| "1Password CLI (op) not found" | Install from https://developer.1password.com/docs/cli/get-started/ |
+| "1Password lookup failed" | Sign in: `eval $(op signin)` |
+| "Could not find page" (404) | Share page with the Notion integration in Notion UI |
+| Stale cached key | Delete `.secrets/notion_api_key` — next run re-fetches |
 
 ## See Also
 

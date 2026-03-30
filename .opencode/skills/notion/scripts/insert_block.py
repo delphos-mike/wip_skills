@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """Insert a block at a specific position in a page.
 
 Usage:
@@ -21,24 +25,23 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any
 
 from notion_utils import (
-    load_api_key,
-    parse_notion_id,
     api_call,
-    get_all_blocks,
-    markdown_to_blocks,
     create_rich_text,
+    load_api_key,
+    markdown_to_blocks,
+    parse_notion_id,
 )
 
 
 def insert_blocks(
     parent_id: str,
-    blocks: List[Dict],
+    blocks: list[dict],
     api_key: str,
-    after_block_id: Optional[str] = None,
-    position: Optional[int] = None,
+    after_block_id: str | None = None,
+    position: int | None = None,
 ):
     """Insert blocks at a specific position.
 
@@ -47,15 +50,26 @@ def insert_blocks(
     """
 
     if position is not None:
-        # Get existing blocks to find insertion point
-        existing = api_call(f"blocks/{parent_id}/children?page_size=100", api_key)
-        existing_blocks = existing.get("results", [])
+        # Get existing blocks to find insertion point (paginate for >100)
+        existing_blocks = []
+        cursor = None
+        while True:
+            endpoint = f"blocks/{parent_id}/children?page_size=100"
+            if cursor:
+                endpoint += f"&start_cursor={cursor}"
+            resp = api_call(endpoint, api_key)
+            existing_blocks.extend(resp.get("results", []))
+            if not resp.get("has_more") or (position > 0 and len(existing_blocks) >= position):
+                break
+            cursor = resp.get("next_cursor")
 
-        if position > 0 and position <= len(existing_blocks):
-            after_block_id = existing_blocks[position - 1]["id"]
+        if position >= 0 and position <= len(existing_blocks):
+            if position > 0:
+                after_block_id = existing_blocks[position - 1]["id"]
+            # position == 0 means insert at top; leave after_block_id as None
 
     # Build request data
-    data: Dict[str, Any] = {"children": blocks}
+    data: dict[str, Any] = {"children": blocks}
     if after_block_id:
         data["after"] = after_block_id
 
@@ -91,7 +105,7 @@ def main():
         api_key = load_api_key()
         parent_id = parse_notion_id(args.parent)
 
-        blocks: List[Dict] = []
+        blocks: list[dict] = []
         if args.text:
             blocks = [
                 {
@@ -113,7 +127,7 @@ def main():
         after_id = parse_notion_id(args.after) if args.after else None
 
         print(f"Inserting {len(blocks)} blocks...", file=sys.stderr)
-        result = insert_blocks(parent_id, blocks, api_key, after_id, args.position)
+        insert_blocks(parent_id, blocks, api_key, after_id, args.position)
 
         print(json.dumps({"success": True, "blocks_inserted": len(blocks)}, indent=2))
 

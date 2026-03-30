@@ -6,6 +6,9 @@ __pycache__/
 *.pyd
 .Python
 
+# Cached secrets (API keys fetched from 1Password)
+.secrets/
+
 # IDE
 .vscode/
 .idea/

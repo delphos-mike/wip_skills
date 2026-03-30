@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.31.0"]
+# ///
 """Find sections in a Notion page by heading text.
 
 Usage:
@@ -19,17 +23,16 @@ Examples:
 import argparse
 import json
 import sys
-from typing import Dict, List, Any, Optional
 
-from notion_utils import load_api_key, parse_notion_id, get_all_blocks
+from notion_utils import get_all_blocks, load_api_key, parse_notion_id
 
 
-def extract_text(rich_text: List[Dict]) -> str:
+def extract_text(rich_text: list[dict]) -> str:
     """Extract plain text from rich_text array."""
     return "".join([rt.get("plain_text", "") for rt in rich_text])
 
 
-def find_sections(blocks: List[Dict]) -> List[Dict]:
+def find_sections(blocks: list[dict]) -> list[dict]:
     """Find all sections (headings) in blocks."""
     sections = []
 
@@ -61,7 +64,7 @@ def find_sections(blocks: List[Dict]) -> List[Dict]:
     return sections
 
 
-def find_section_by_name(sections: List[Dict], query: str) -> Optional[Dict]:
+def find_section_by_name(sections: list[dict], query: str) -> dict | None:
     """Find section by name (case-insensitive)."""
     query_lower = query.lower()
 

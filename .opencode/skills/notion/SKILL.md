@@ -1,27 +1,37 @@
 ---
+description: Complete Notion document management via API. Search, read, write, update,
+  delete, and analyze content. Handle page overwriting, section updates, auto-linking,
+  comment extraction, and full CRUD operations. Use for document automation, content
+  management, and collaboration workflows.
 name: notion
-description: Complete Notion document management via API. Search, read, write, update, delete, and analyze content. Handle page overwriting, section updates, auto-linking, comment extraction, and full CRUD operations. Use for document automation, content management, and collaboration workflows.
 ---
 
 # Notion Document Management
 
 ## How to Run Scripts
 
-Scripts live in this skill's `scripts/` directory. To invoke them, determine the
-skill directory from this file's path and run with `python3`:
+Scripts live in this skill's `scripts/` directory. Run them with `uv run`:
 
 ```bash
-# Pattern: python3 <skill_dir>/scripts/<script_name>.py <args>
+# Pattern: uv run <skill_dir>/scripts/<script_name>.py <args>
 # Example (if skill is at .opencode/skills/notion/):
-python3 .opencode/skills/notion/scripts/search_pages.py "query"
+uv run .opencode/skills/notion/scripts/search_pages.py "query"
 ```
 
-**Auto-bootstrap:** On first run, scripts automatically create a `.venv` in the
-skill directory and install dependencies (prefers `uv`, falls back to `pip`).
-No manual setup required.
+Each script declares its dependencies via PEP 723 inline metadata. `uv run`
+resolves and caches them automatically — no venv or manual install needed.
 
-**Environment:** Scripts read `NOTION_API_KEY` from the environment. The user
-must create a Notion integration and share it with their pages.
+**Prerequisites:** `uv` and 1Password CLI (`op`) must be installed.
+On first run, scripts automatically fetch the Notion API key from 1Password
+and cache it locally in `.secrets/notion_api_key` (0600 permissions).
+
+API key resolution order:
+1. `NOTION_API_KEY` environment variable (if set)
+2. Cached key in `.secrets/notion_api_key`
+3. 1Password CLI: `op read "op://it-ops-helpers/NOTION_SKILL_INTEGRATION/credential"`
+
+Override the 1Password reference with `NOTION_OP_REF` env var if your vault
+layout differs.
 
 ## Comment Preservation (CRITICAL)
 
@@ -38,6 +48,18 @@ Notion comments are attached to specific blocks. Deleting or replacing a block
 **Default to safe operations.** Before any destructive operation, ask:
 "This page might have comments. Should I preserve them?"
 
+### Mandatory Pre-Write Read (CRITICAL)
+
+Before ANY destructive operation (`replace_page_content.py`, `clear_page.py`,
+`delete_blocks.py`, `update_from_json.py`): **ALWAYS read the page first** with
+`read_page.py` and show the user what exists. Do not bypass this even if the
+user says "update" or "replace" -- they may not remember what's on the page.
+
+**NEVER pass `--yes` to destructive scripts without first reading and presenting
+the existing content to the user.** The interactive prompt exists as a last-resort
+safety net; bypassing it requires the agent to have already performed its own due
+diligence.
+
 ## Script Reference
 
 ### Search & Read
@@ -51,6 +73,29 @@ search_pages.py <query> [--limit N] [--output json|table]
 ```bash
 read_page.py <page_url_or_id> [--output markdown|json|text]
 ```
+
+### Database Operations
+
+**query_database.py** — Query a Notion database with filtering
+```bash
+query_database.py <database_url_or_id> [--output table|json]
+query_database.py <database_url_or_id> --empty Summary
+query_database.py <database_url_or_id> --not-empty Summary
+query_database.py <database_url_or_id> --filter "Status=Done"
+query_database.py <database_url_or_id> --props "Name,Summary,Status"
+```
+Supports `--filter "Prop=Value"`, `--empty Prop`, `--not-empty Prop` (all
+repeatable). Auto-detects property types from the database schema. Use
+`--output json` for machine-readable output with page IDs.
+
+**update_page_property.py** — Update properties on a database page
+```bash
+update_page_property.py <page_url_or_id> --set "Summary=New summary"
+update_page_property.py <page_url_or_id> --set "Status=Done" --set "Priority=High"
+update_page_property.py <page_url_or_id> --set "Summary="  # clear property
+```
+Supports rich_text, title, number, select, multi_select, status, checkbox,
+url, email, phone_number, and date properties. Auto-detects property types.
 
 **find_section.py** — Locate a section by heading text
 ```bash
@@ -73,9 +118,10 @@ insert_block.py <page_id> --text "content" --position 0       # at top
 insert_block.py <page_id> --markdown "..." --after <block_id>  # after block
 ```
 
-**link_pages.py** — Add page links
+**link_pages.py** — Find and link page references
 ```bash
-link_pages.py <source_page> <target_page1> [<target_page2> ...]
+link_pages.py <page_id> --find-references
+link_pages.py <page_id> --link "QUERY" <target_page_id>
 ```
 
 ### Edit Content
@@ -83,11 +129,9 @@ link_pages.py <source_page> <target_page1> [<target_page2> ...]
 **update_block.py** — Update a single block (safe)
 ```bash
 update_block.py <block_id> --text "new content"
-update_block.py <block_id> --heading-2 "New Heading"
-update_block.py <block_id> --code "print('hi')" --language python
+update_block.py <block_id> --file content.txt
 ```
-Supported types: paragraph, heading_1/2/3, code, quote, bulleted_list_item,
-numbered_list_item, to_do.
+Updates the rich_text content of a block. Block type is auto-detected.
 
 **sync_page.py** — Smart sync preserving comments (RECOMMENDED)
 ```bash
@@ -193,6 +237,14 @@ User wants to READ/SEARCH:
   "Find page"       → search_pages.py
   "Read page"       → read_page.py
   "Get comments"    → extract_comments.py
+  "Query database"  → query_database.py
+  "Find empty X"    → query_database.py --empty X
+  "List DB entries" → query_database.py
+
+User wants to UPDATE DATABASE PROPERTIES:
+  "Set summary"     → update_page_property.py --set "Summary=..."
+  "Update status"   → update_page_property.py --set "Status=Done"
+  "Batch update"    → query_database.py (get IDs) + update_page_property.py
 
 User wants to ADD:
   "Add to end"      → append_blocks.py
@@ -242,4 +294,7 @@ Scripts accept all formats:
 |---------|----------|
 | "Could not find page" (404) | Share the page with your Notion integration |
 | Rate limiting | Handled automatically (3 req/sec) |
-| "ModuleNotFoundError: requests" | Delete `.venv` in skill dir; scripts will re-bootstrap |
+| "ModuleNotFoundError: requests" | Ensure you run scripts via `uv run`, not `python3` directly |
+| "1Password CLI (op) not found" | Install from https://developer.1password.com/docs/cli/get-started/ |
+| "1Password lookup failed" | Sign in: `eval $(op signin)` — or check the `NOTION_OP_REF` value |
+| Stale cached key | Delete `.secrets/notion_api_key` in skill dir; next run will re-fetch from 1Password |
